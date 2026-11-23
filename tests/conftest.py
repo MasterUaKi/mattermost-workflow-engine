@@ -1,12 +1,12 @@
 # Author: Oleh Riabtsev
 # File: tests/conftest.py
 # Created: 2026-11-23
-# Version: 1.0.0
+# Version: 1.1.0
 
 """
 Pytest fixtures providing:
 - An isolated in-memory async SQLite database per test function.
-- A stateful Mattermost REST API v4 mock server via httpx.MockTransport.
+- A stateful Mattermost REST API v4 mock server via httpx.MockTransport (including user search).
 - Deterministic workflow definitions covering sequential, multi-approver sequential, and parallel stages.
 - An async HTTP client bound directly to the FastAPI ASGI application.
 """
@@ -59,6 +59,38 @@ class FakeMattermostServer:
         # GET /api/v4/users/me
         if method == "GET" and path == "/api/v4/users/me":
             return httpx.Response(200, json={"id": self.bot_user_id, "username": "approval-bot"})
+
+        # POST /api/v4/users/search or GET /api/v4/users
+        if (method == "POST" and path == "/api/v4/users/search") or (
+            method == "GET" and path == "/api/v4/users"
+        ):
+            sample_users = [
+                {
+                    "id": self.bot_user_id,
+                    "username": "approval-bot",
+                    "first_name": "Approval",
+                    "last_name": "Bot",
+                    "is_bot": True,
+                    "delete_at": 0,
+                },
+                {
+                    "id": "user_alice",
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "Creator",
+                    "email": "alice@local.test",
+                    "delete_at": 0,
+                },
+                {
+                    "id": "user_bob",
+                    "username": "bob",
+                    "first_name": "Bob",
+                    "last_name": "Reviewer",
+                    "email": "bob@local.test",
+                    "delete_at": 0,
+                },
+            ]
+            return httpx.Response(200, json=sample_users)
 
         # GET /api/v4/users/{user_id}
         if method == "GET" and path.startswith("/api/v4/users/"):
@@ -220,6 +252,7 @@ async def api_client(
     monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_dir))
     monkeypatch.setattr(settings, "MATTERMOST_URL", "http://mattermost.test")
     monkeypatch.setattr(settings, "PUBLIC_BASE_URL", "http://engine.test")
+    monkeypatch.setattr(settings, "STUDIO_PUBLIC_URL", "http://studio.test")
     monkeypatch.setattr(settings, "MATTERMOST_BOT_TOKEN", "test_bot_token")
     monkeypatch.setattr(settings, "MATTERMOST_WEBHOOK_SECRET", "test_secret_token")
 

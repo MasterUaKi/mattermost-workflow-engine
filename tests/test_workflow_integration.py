@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: tests/test_workflow_integration.py
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.1
 
 """
 End-to-end integration tests for the Mattermost Document Approval Workflow Engine.
@@ -14,11 +14,22 @@ Covers:
    initiator DM notification, and temporary file cleanup.
 5. Security token verification, approver authorization checks, and button idempotency.
 6. REST API payload validation, 404 error handling, and orphaned file cleanup on failure.
+7. Mattermost Bot WebSocket DM command ('хочу начать согласование' / 'start') generating
+   a signed Studio session token and authenticating the user.
+8. Visual Workflow Studio template ownership enforcement (only creator can edit/delete).
+9. Conditional alternative routing on rejection (on_reject='goto_step', is_alternative=True)
+   with escalation banner delivery and subsequent pipeline progression.
 """
 
 import json
 from pathlib import Path
+import re
 import httpx
+
+from app.auth_tokens import create_studio_session_token
+from app.bot_listener import BotWebSocketListener
+from app.config import get_settings
+from app.main import app
 from tests.conftest import FakeMattermostServer
 
 
@@ -60,7 +71,6 @@ async def test_single_step_sequential_approval_with_attachment(
     """
     upload_dir = tmp_path / "uploads"
 
-    # 1. Start single-step workflow with a PDF attachment
     start_resp = await api_client.post(
         "/api/v1/workflows/start",
         data={
@@ -79,12 +89,10 @@ async def test_single_step_sequential_approval_with_attachment(
     assert start_data["status"] == "IN_PROGRESS"
     assert start_data["current_step_index"] == 0
 
-    # Verify temporary file exists on disk while workflow is active
     staged_files = list(upload_dir.glob("*receipt.pdf"))
     assert len(staged_files) == 1
     assert staged_files[0].is_file()
 
-    # Verify file upload and initial interactive card dispatch to user_mgr_1
     assert len(fake_mm_server.uploaded_files) == 1
     assert fake_mm_server.uploaded_files[0]["channel_id"] == "dm_user_mgr_1"
     assert len(fake_mm_server.posts) == 1
@@ -96,7 +104,6 @@ async def test_single_step_sequential_approval_with_attachment(
     assert len(attachment["actions"]) == 2
     task_id = attachment["actions"][0]["integration"]["context"]["task_id"]
 
-    # 2. Simulate approver clicking the Approve button
     action_resp = await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -112,23 +119,19 @@ async def test_single_step_sequential_approval_with_attachment(
     assert action_resp.status_code == 200
     assert action_resp.json() == {}
 
-    # Verify temporary attachment file was physically removed from uploads after approval
     assert list(upload_dir.iterdir()) == []
 
-    # Verify original card was updated to remove buttons and display approval status
     assert len(fake_mm_server.updated_posts) == 1
     updated_attachment = fake_mm_server.updated_posts[0]["props"]["attachments"][0]
     assert "actions" not in updated_attachment
     assert "@mgr_one" in updated_attachment["text"]
     assert updated_attachment["color"] == "#28A745"
 
-    # Verify final Direct Message notification was sent to the initiator
     assert len(fake_mm_server.posts) == 2
     completion_dm = fake_mm_server.posts["post_2"]
     assert completion_dm["channel_id"] == "dm_user_initiator"
     assert "Completed" in completion_dm["props"]["attachments"][0]["title"]
 
-    # 3. Verify final workflow state and preserved attachment metadata via REST API
     status_resp = await api_client.get(f"/api/v1/workflows/{workflow_id}")
     assert status_resp.status_code == 200
     details = status_resp.json()
@@ -162,14 +165,12 @@ async def test_multi_approver_sequential_stage_order(
     assert start_resp.status_code == 201
     workflow_id = start_resp.json()["workflow_id"]
 
-    # Only the first sequential approver (user_seq_1) receives a post initially
     assert len(fake_mm_server.posts) == 1
     assert fake_mm_server.posts["post_1"]["channel_id"] == "dm_user_seq_1"
     task_1_id = fake_mm_server.posts["post_1"]["props"]["attachments"][0]["actions"][0]["integration"][
         "context"
     ]["task_id"]
 
-    # First approver approves -> second approver (user_seq_2) receives their card
     resp_1 = await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -186,7 +187,6 @@ async def test_multi_approver_sequential_stage_order(
     assert len(fake_mm_server.posts) == 2
     assert fake_mm_server.posts["post_2"]["channel_id"] == "dm_user_seq_2"
 
-    # Workflow must remain IN_PROGRESS until user_seq_2 approves
     mid_details = (await api_client.get(f"/api/v1/workflows/{workflow_id}")).json()
     assert mid_details["status"] == "IN_PROGRESS"
 
@@ -194,7 +194,6 @@ async def test_multi_approver_sequential_stage_order(
         "context"
     ]["task_id"]
 
-    # Second approver approves -> workflow completes
     resp_2 = await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -222,10 +221,8 @@ async def test_multistep_sequential_and_parallel_synchronization(
     """
     Verifies a 3-stage workflow with a file attachment:
     Step 0 (sequential: user_dept) -> Step 1 (parallel: user_legal + user_finance) -> Step 2 (sequential: user_ceo).
-    Ensures:
-    - Step 2 is dispatched only after BOTH parallel approvers approve.
-    - The temporary attachment remains on disk across intermediate stages so all 4 approvers receive it,
-      and is deleted only after the final CEO approval.
+    Ensures Step 2 is dispatched only after BOTH parallel approvers approve, and attachment cleanup
+    occurs only after final CEO approval.
     """
     upload_dir = tmp_path / "uploads"
 
@@ -243,7 +240,6 @@ async def test_multistep_sequential_and_parallel_synchronization(
     workflow_id = start_resp.json()["workflow_id"]
     assert len(list(upload_dir.glob("*enterprise_contract.pdf"))) == 1
 
-    # Step 0: dept_head approves
     step0_post = fake_mm_server.posts["post_1"]
     assert step0_post["channel_id"] == "dm_user_dept"
     step0_task_id = step0_post["props"]["attachments"][0]["actions"][0]["integration"]["context"]["task_id"]
@@ -261,10 +257,8 @@ async def test_multistep_sequential_and_parallel_synchronization(
         ),
     )
 
-    # Attachment must still exist on disk for subsequent stages
     assert len(list(upload_dir.glob("*enterprise_contract.pdf"))) == 1
 
-    # Step 1 (parallel): two posts must be dispatched simultaneously (post_2 and post_3)
     assert len(fake_mm_server.posts) == 3
     channels_step1 = {
         fake_mm_server.posts["post_2"]["channel_id"],
@@ -279,7 +273,6 @@ async def test_multistep_sequential_and_parallel_synchronization(
         "context"
     ]["task_id"]
 
-    # First parallel approver (user_legal) approves -> barrier must hold at step_index == 1
     await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -295,10 +288,9 @@ async def test_multistep_sequential_and_parallel_synchronization(
     mid_state = (await api_client.get(f"/api/v1/workflows/{workflow_id}")).json()
     assert mid_state["status"] == "IN_PROGRESS"
     assert mid_state["current_step_index"] == 1
-    assert len(fake_mm_server.posts) == 3  # CEO has NOT been notified yet
+    assert len(fake_mm_server.posts) == 3
     assert len(list(upload_dir.glob("*enterprise_contract.pdf"))) == 1
 
-    # Second parallel approver (user_finance) approves -> advances to Step 2 (user_ceo)
     await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -314,12 +306,11 @@ async def test_multistep_sequential_and_parallel_synchronization(
     assert len(fake_mm_server.posts) == 4
     ceo_post = fake_mm_server.posts["post_4"]
     assert ceo_post["channel_id"] == "dm_user_ceo"
-    assert len(fake_mm_server.uploaded_files) == 4  # Uploaded to all 4 approvers' DMs
+    assert len(fake_mm_server.uploaded_files) == 4
     assert len(list(upload_dir.glob("*enterprise_contract.pdf"))) == 1
 
     ceo_task_id = ceo_post["props"]["attachments"][0]["actions"][0]["integration"]["context"]["task_id"]
 
-    # Step 2: CEO approves -> workflow reaches APPROVED and temporary file is deleted
     await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -347,12 +338,11 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     tmp_path: Path,
 ) -> None:
     """
-    Verifies the complete rejection flow during a parallel stage:
+    Verifies the standard rejection flow during a parallel stage:
     1. Clicking Reject opens an Interactive Dialog.
     2. Submitting an empty reason returns a field-level validation error.
-    3. Submitting a valid reason marks the task REJECTED, cancels the parallel peer's task and
-       removes their buttons, sets the workflow status to REJECTED, sends a DM to the initiator,
-       and deletes temporary attachment files from uploads.
+    3. Submitting a valid reason marks the task REJECTED, cancels the parallel peer's task,
+       notifies the initiator, and cleans up temporary attachment files.
     """
     upload_dir = tmp_path / "uploads"
 
@@ -369,7 +359,6 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     workflow_id = start_resp.json()["workflow_id"]
     assert len(list(upload_dir.glob("*sla_amendment.pdf"))) == 1
 
-    # Advance past Step 0 (dept_head) to enter the parallel Legal & Finance stage
     step0_task_id = fake_mm_server.posts["post_1"]["props"]["attachments"][0]["actions"][0]["integration"][
         "context"
     ]["task_id"]
@@ -390,7 +379,6 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
         "context"
     ]["task_id"]
 
-    # 1. Legal clicks Reject -> Interactive Dialog is opened
     reject_click_resp = await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -410,7 +398,6 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     assert opened_dialog["trigger_id"] == "trig_reject_999"
     dialog_state = opened_dialog["dialog"]["state"]
 
-    # 2. Submit dialog with whitespace-only reason -> returns validation error
     empty_submit_resp = await api_client.post(
         "/api/v1/mattermost/dialogs/reject?token=test_secret_token",
         json={
@@ -425,10 +412,8 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     )
     assert empty_submit_resp.status_code == 200
     assert "rejection_reason" in empty_submit_resp.json()["errors"]
-    # File must still remain on disk because rejection was not yet accepted
     assert len(list(upload_dir.glob("*sla_amendment.pdf"))) == 1
 
-    # 3. Submit dialog with valid rejection reason
     rejection_text = "Liability cap clause violates corporate policy."
     valid_submit_resp = await api_client.post(
         "/api/v1/mattermost/dialogs/reject?token=test_secret_token",
@@ -445,21 +430,17 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     assert valid_submit_resp.status_code == 200
     assert valid_submit_resp.json() == {}
 
-    # Verify temporary attachment file was physically removed from uploads after rejection
     assert list(upload_dir.iterdir()) == []
 
-    # Verify both parallel cards (post_2 and post_3) now have no interactive buttons
     assert "actions" not in fake_mm_server.posts["post_2"]["props"]["attachments"][0]
     assert rejection_text in fake_mm_server.posts["post_2"]["props"]["attachments"][0]["text"]
     assert "actions" not in fake_mm_server.posts["post_3"]["props"]["attachments"][0]
     assert "Cancelled" in fake_mm_server.posts["post_3"]["props"]["attachments"][0]["text"]
 
-    # Verify initiator received DM containing the rejection reason
     initiator_dm = fake_mm_server.posts["post_4"]
     assert initiator_dm["channel_id"] == "dm_user_initiator"
     assert rejection_text in initiator_dm["props"]["attachments"][0]["text"]
 
-    # Verify database task statuses, workflow status, and preserved attachment metadata
     final_details = (await api_client.get(f"/api/v1/workflows/{workflow_id}")).json()
     assert final_details["status"] == "REJECTED"
     assert len(final_details["attachments"]) == 1
@@ -489,7 +470,6 @@ async def test_security_authorization_and_idempotency(
         "context"
     ]["task_id"]
 
-    # 1. Invalid webhook secret token -> HTTP 401
     bad_token_resp = await api_client.post(
         "/api/v1/mattermost/actions?token=wrong_secret",
         json=_build_button_payload(
@@ -504,7 +484,6 @@ async def test_security_authorization_and_idempotency(
     )
     assert bad_token_resp.status_code == 401
 
-    # 2. Unauthorized user attempts to approve another user's task -> ephemeral warning
     unauth_resp = await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -520,7 +499,6 @@ async def test_security_authorization_and_idempotency(
     assert unauth_resp.status_code == 200
     assert "not authorized" in unauth_resp.json()["ephemeral_text"].lower()
 
-    # 3. Legitimate approver approves once -> succeeds
     first_approve = await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -536,7 +514,6 @@ async def test_security_authorization_and_idempotency(
     assert first_approve.status_code == 200
     assert first_approve.json() == {}
 
-    # 4. Duplicate click on the same already-processed task -> ephemeral warning, no duplicate DM
     second_approve = await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -551,7 +528,7 @@ async def test_security_authorization_and_idempotency(
     )
     assert second_approve.status_code == 200
     assert "no longer active" in second_approve.json()["ephemeral_text"].lower()
-    assert len(fake_mm_server.posts) == 2  # No duplicate completion DM created
+    assert len(fake_mm_server.posts) == 2
 
 
 async def test_api_validation_and_not_found_errors(
@@ -564,7 +541,6 @@ async def test_api_validation_and_not_found_errors(
     """
     upload_dir = tmp_path / "uploads"
 
-    # Unsupported language
     bad_lang_resp = await api_client.post(
         "/api/v1/workflows/start",
         data={
@@ -576,7 +552,6 @@ async def test_api_validation_and_not_found_errors(
     )
     assert bad_lang_resp.status_code == 400
 
-    # Invalid JSON in document_data
     bad_json_resp = await api_client.post(
         "/api/v1/workflows/start",
         data={
@@ -588,7 +563,6 @@ async def test_api_validation_and_not_found_errors(
     )
     assert bad_json_resp.status_code == 400
 
-    # Unknown workflow type with file upload -> returns 404 and cleans up staged file
     unknown_wf_resp = await api_client.post(
         "/api/v1/workflows/start",
         data={
@@ -601,6 +575,340 @@ async def test_api_validation_and_not_found_errors(
     assert unknown_wf_resp.status_code == 404
     assert list(upload_dir.iterdir()) == []
 
-    # Non-existent workflow instance ID
     missing_id_resp = await api_client.get("/api/v1/workflows/00000000-0000-0000-0000-000000000000")
     assert missing_id_resp.status_code == 404
+
+
+async def test_bot_dm_command_generates_valid_studio_session(
+    api_client: httpx.AsyncClient,
+    fake_mm_server: FakeMattermostServer,
+) -> None:
+    """
+    Verifies that sending a trigger phrase (e.g. 'хочу начать согласование') as a Direct Message
+    to the bot sends back a signed Studio magic link that authenticates the sender.
+    """
+    settings = get_settings()
+    listener = BotWebSocketListener(
+        settings=settings,
+        mm_client=app.state.mm_client,
+        translator=app.state.translator,
+    )
+
+    # 1. Messages from the bot itself or non-DM channels must be ignored
+    bot_self_event = {
+        "event": "posted",
+        "data": {
+            "channel_type": "D",
+            "post": json.dumps({"user_id": fake_mm_server.bot_user_id, "message": "start"}),
+        },
+    }
+    await listener._handle_event(json.dumps(bot_self_event), bot_id=fake_mm_server.bot_user_id)
+    assert len(fake_mm_server.posts) == 0
+
+    public_channel_event = {
+        "event": "posted",
+        "data": {
+            "channel_type": "O",
+            "post": json.dumps({"user_id": "user_alice", "message": "start"}),
+        },
+    }
+    await listener._handle_event(json.dumps(public_channel_event), bot_id=fake_mm_server.bot_user_id)
+    assert len(fake_mm_server.posts) == 0
+
+    # 2. Direct Message with Russian trigger phrase from user_alice
+    user_dm_event = {
+        "event": "posted",
+        "data": {
+            "channel_type": "D",
+            "post": json.dumps({"user_id": "user_alice", "message": "Хочу начать согласование"}),
+        },
+    }
+    await listener._handle_event(json.dumps(user_dm_event), bot_id=fake_mm_server.bot_user_id)
+
+    assert len(fake_mm_server.posts) == 1
+    dm_post = fake_mm_server.posts["post_1"]
+    assert dm_post["channel_id"] == "dm_user_alice"
+    dm_text = dm_post["props"]["attachments"][0]["text"]
+
+    match = re.search(r"http://studio\.test/studio\?token=([A-Za-z0-9_\-\.]+)", dm_text)
+    assert match is not None
+    studio_token = match.group(1)
+
+    # 3. Verify Studio HTML page and session endpoint accept the generated token
+    page_resp = await api_client.get(f"/studio?token={studio_token}")
+    assert page_resp.status_code == 200
+    assert "Visual Document Approval Studio" in page_resp.text
+
+    session_resp = await api_client.get(
+        "/api/v1/studio/session",
+        headers={"X-Studio-Token": studio_token},
+    )
+    assert session_resp.status_code == 200
+    assert session_resp.json() == {
+        "user_id": "user_alice",
+        "username": "username_user_alice",
+    }
+
+    # 4. Verify invalid tokens are rejected with HTTP 401
+    bad_session_resp = await api_client.get(
+        "/api/v1/studio/session",
+        headers={"X-Studio-Token": "tampered.token.value"},
+    )
+    assert bad_session_resp.status_code == 401
+
+
+async def test_template_ownership_permissions(api_client: httpx.AsyncClient) -> None:
+    """
+    Verifies that only the creator (owner_id) of a workflow template can modify or delete its stages,
+    while other users can inspect it with can_edit=False.
+    """
+    settings = get_settings()
+    alice_token = create_studio_session_token(settings, user_id="user_alice", username="alice")
+    bob_token = create_studio_session_token(settings, user_id="user_bob", username="bob")
+
+    create_payload = {
+        "name": {"en": "Alice CapEx Route", "de": "Alice Investitionsroute"},
+        "description": {"en": "Capital expenditure review"},
+        "default_lang": "en",
+        "steps": [
+            {
+                "id": "step_1",
+                "name": {"en": "Finance Check", "de": "Finanzprüfung"},
+                "type": "sequential",
+                "approvers": ["user_bob"],
+                "is_alternative": False,
+                "on_reject": "return_to_initiator",
+                "on_reject_step_id": None,
+            }
+        ],
+        "default_fields": [
+            {"name": "Budget Code", "type": "text", "default_value": "CAPEX-01", "required": True}
+        ],
+    }
+
+    # 1. Alice creates the template -> can_edit is True
+    create_resp = await api_client.post(
+        "/api/v1/templates",
+        headers={"X-Studio-Token": alice_token},
+        json=create_payload,
+    )
+    assert create_resp.status_code == 201
+    created_tpl = create_resp.json()
+    template_id = created_tpl["id"]
+    assert created_tpl["owner_id"] == "user_alice"
+    assert created_tpl["can_edit"] is True
+
+    # 2. Bob lists templates -> sees Alice's template with can_edit=False
+    bob_list_resp = await api_client.get(
+        "/api/v1/templates",
+        headers={"X-Studio-Token": bob_token},
+    )
+    assert bob_list_resp.status_code == 200
+    bob_view = next(item for item in bob_list_resp.json() if item["id"] == template_id)
+    assert bob_view["can_edit"] is False
+
+    # 3. Bob attempts to modify or delete Alice's template -> HTTP 403 Forbidden
+    bob_update_resp = await api_client.put(
+        f"/api/v1/templates/{template_id}",
+        headers={"X-Studio-Token": bob_token},
+        json=create_payload,
+    )
+    assert bob_update_resp.status_code == 403
+
+    bob_delete_resp = await api_client.delete(
+        f"/api/v1/templates/{template_id}",
+        headers={"X-Studio-Token": bob_token},
+    )
+    assert bob_delete_resp.status_code == 403
+
+    # 4. Alice updates her own template -> HTTP 200 OK
+    updated_payload = {
+        **create_payload,
+        "name": {"en": "Alice CapEx Route v2", "de": "Alice Investitionsroute v2"},
+    }
+    alice_update_resp = await api_client.put(
+        f"/api/v1/templates/{template_id}",
+        headers={"X-Studio-Token": alice_token},
+        json=updated_payload,
+    )
+    assert alice_update_resp.status_code == 200
+    assert alice_update_resp.json()["name"]["en"] == "Alice CapEx Route v2"
+
+    # 5. Alice deletes her own template -> HTTP 204 No Content
+    alice_delete_resp = await api_client.delete(
+        f"/api/v1/templates/{template_id}",
+        headers={"X-Studio-Token": alice_token},
+    )
+    assert alice_delete_resp.status_code == 204
+
+
+async def test_alternative_routing_on_rejection_and_escalation_banner(
+    api_client: httpx.AsyncClient,
+    fake_mm_server: FakeMattermostServer,
+    tmp_path: Path,
+) -> None:
+    """
+    Verifies conditional rejection branching:
+    - Step 0 ('initial_review') routes rejection to Step 1 ('escalation_board', is_alternative=True).
+    - When Step 0 rejects, the workflow does NOT terminate; instead, it routes to Step 1 with
+      an escalation banner containing the rejection reason.
+    - After Step 1 approves, the workflow advances to Step 2 ('final_accounting') and completes
+      as APPROVED, cleaning up the attachment file only at the very end.
+    """
+    settings = get_settings()
+    alice_token = create_studio_session_token(settings, user_id="user_alice", username="alice")
+    upload_dir = tmp_path / "uploads"
+
+    # 1. Create a 3-stage template with an alternative rejection branch
+    tpl_resp = await api_client.post(
+        "/api/v1/templates",
+        headers={"X-Studio-Token": alice_token},
+        json={
+            "name": {"en": "Escalating Purchase Route", "de": "Eskalationsroute Einkauf"},
+            "description": {"en": "Routes Stage 1 rejection to Director Escalation"},
+            "default_lang": "en",
+            "steps": [
+                {
+                    "id": "initial_review",
+                    "name": {"en": "Team Lead Check", "de": "Teamleiter"},
+                    "type": "sequential",
+                    "approvers": ["user_lead"],
+                    "is_alternative": False,
+                    "on_reject": "goto_step",
+                    "on_reject_step_id": "escalation_board",
+                },
+                {
+                    "id": "escalation_board",
+                    "name": {"en": "Director Escalation", "de": "Direktor-Eskalation"},
+                    "type": "sequential",
+                    "approvers": ["user_director"],
+                    "is_alternative": True,
+                    "on_reject": "return_to_initiator",
+                    "on_reject_step_id": None,
+                },
+                {
+                    "id": "final_accounting",
+                    "name": {"en": "Final Accounting", "de": "Buchhaltung"},
+                    "type": "sequential",
+                    "approvers": ["user_accountant"],
+                    "is_alternative": False,
+                    "on_reject": "return_to_initiator",
+                    "on_reject_step_id": None,
+                },
+            ],
+            "default_fields": [],
+        },
+    )
+    assert tpl_resp.status_code == 201
+    template_slug = tpl_resp.json()["slug"]
+
+    # 2. Launch workflow using the newly created visual template slug and custom typed fields
+    custom_fields_payload = {
+        "_custom_fields": [
+            {"name": "Amount", "type": "number", "value": "8900"},
+            {"name": "Urgent", "type": "boolean", "value": "Yes"},
+        ]
+    }
+    start_resp = await api_client.post(
+        "/api/v1/workflows/start",
+        data={
+            "workflow_type": template_slug,
+            "title": "GPU Workstation Purchase",
+            "initiator_id": "user_alice",
+            "lang": "en",
+            "document_data": json.dumps(custom_fields_payload),
+        },
+        files=[("files", ("quote_gpu.pdf", b"%PDF-1.4 quote", "application/pdf"))],
+    )
+    assert start_resp.status_code == 201
+    workflow_id = start_resp.json()["workflow_id"]
+    assert len(list(upload_dir.glob("*quote_gpu.pdf"))) == 1
+
+    # Verify Step 0 card was sent to user_lead with custom fields rendered
+    step0_post = fake_mm_server.posts["post_1"]
+    assert step0_post["channel_id"] == "dm_user_lead"
+    step0_attachment = step0_post["props"]["attachments"][0]
+    assert any("Amount" in f["value"] and "8900" in f["value"] for f in step0_attachment["fields"])
+    step0_task_id = step0_attachment["actions"][0]["integration"]["context"]["task_id"]
+
+    # 3. user_lead clicks Reject -> opens dialog -> submits rejection reason
+    await api_client.post(
+        "/api/v1/mattermost/actions?token=test_secret_token",
+        json=_build_button_payload(
+            user_id="user_lead",
+            user_name="lead_user",
+            channel_id="dm_user_lead",
+            post_id="post_1",
+            action="reject",
+            task_id=step0_task_id,
+            workflow_id=workflow_id,
+            trigger_id="trig_alt_1",
+        ),
+    )
+    dialog_state = fake_mm_server.opened_dialogs[0]["dialog"]["state"]
+
+    rejection_reason = "Exceeds department limit; requires Director sign-off."
+    await api_client.post(
+        "/api/v1/mattermost/dialogs/reject?token=test_secret_token",
+        json={
+            "type": "dialog_submission",
+            "callback_id": "reject_document_dialog",
+            "state": dialog_state,
+            "user_id": "user_lead",
+            "channel_id": "dm_user_lead",
+            "submission": {"rejection_reason": rejection_reason},
+            "cancelled": False,
+        },
+    )
+
+    # Workflow must remain IN_PROGRESS at current_step_index == 1 (escalation_board)
+    mid_state = (await api_client.get(f"/api/v1/workflows/{workflow_id}")).json()
+    assert mid_state["status"] == "IN_PROGRESS"
+    assert mid_state["current_step_index"] == 1
+    assert len(list(upload_dir.glob("*quote_gpu.pdf"))) == 1
+
+    # Verify post_1 was marked Rerouted (#F59E0B) and post_2 was dispatched to user_director with escalation banner
+    assert fake_mm_server.posts["post_1"]["props"]["attachments"][0]["color"] == "#F59E0B"
+    escalation_post = fake_mm_server.posts["post_2"]
+    assert escalation_post["channel_id"] == "dm_user_director"
+    esc_attachment = escalation_post["props"]["attachments"][0]
+    assert rejection_reason in esc_attachment["text"]
+    assert "@username_user_lead" in esc_attachment["text"]
+    step1_task_id = esc_attachment["actions"][0]["integration"]["context"]["task_id"]
+
+    # 4. Director approves Step 1 -> advances to Step 2 ('final_accounting')
+    await api_client.post(
+        "/api/v1/mattermost/actions?token=test_secret_token",
+        json=_build_button_payload(
+            user_id="user_director",
+            user_name="director_user",
+            channel_id="dm_user_director",
+            post_id="post_2",
+            action="approve",
+            task_id=step1_task_id,
+            workflow_id=workflow_id,
+        ),
+    )
+    assert len(fake_mm_server.posts) == 3
+    step2_post = fake_mm_server.posts["post_3"]
+    assert step2_post["channel_id"] == "dm_user_accountant"
+    step2_task_id = step2_post["props"]["attachments"][0]["actions"][0]["integration"]["context"]["task_id"]
+
+    # 5. Accountant approves Step 2 -> workflow finishes as APPROVED and file is cleaned up
+    await api_client.post(
+        "/api/v1/mattermost/actions?token=test_secret_token",
+        json=_build_button_payload(
+            user_id="user_accountant",
+            user_name="accountant_user",
+            channel_id="dm_user_accountant",
+            post_id="post_3",
+            action="approve",
+            task_id=step2_task_id,
+            workflow_id=workflow_id,
+        ),
+    )
+
+    assert list(upload_dir.iterdir()) == []
+    final_state = (await api_client.get(f"/api/v1/workflows/{workflow_id}")).json()
+    assert final_state["status"] == "APPROVED"
+    assert "STEP_REROUTED_ON_REJECT" in [log["action"] for log in final_state["audit_logs"]]
