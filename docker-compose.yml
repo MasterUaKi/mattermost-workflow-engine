@@ -1,0 +1,56 @@
+# Author: Oleh Riabtsev
+# File: docker-compose.yml
+# Created: 2026-11-23
+# Version: 1.0.0
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: mattermost-workflow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-workflow_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-workflow_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-workflow_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-workflow_user} -d ${POSTGRES_DB:-workflow_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  workflow-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mattermost-workflow-engine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override DATABASE_URL to connect to the PostgreSQL container via asyncpg
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-workflow_user}:${POSTGRES_PASSWORD:-workflow_pass}@db:5432/${POSTGRES_DB:-workflow_db}
+      WORKFLOWS_CONFIG_PATH: /app/workflows.yaml
+      LOCALES_PATH: /app/locales.yaml
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      # Mount workflow rules and localization files directly so edits do not require image rebuilds
+      - ./workflows.yaml:/app/workflows.yaml:ro
+      - ./locales.yaml:/app/locales.yaml:ro
+      # Persist uploaded document attachments across container restarts
+      - workflow_uploads:/app/uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  postgres_data:
+  workflow_uploads:
