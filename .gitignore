@@ -1,0 +1,38 @@
+# Author: Oleh Riabtsev
+# File: .gitignore
+# Created: 2026-11-23
+# Version: 1.0.0
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments and cache
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local SQLite databases and runtime uploads
+*.db
+*.sqlite
+*.sqlite3
+uploads/*
+!uploads/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# IDEs and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,64 @@
+# Author: Oleh Riabtsev
+# File: workflows.yaml
+# Created: 2026-11-23
+# Version: 1.0.0
+
+default_lang: "de"
+
+workflows:
+  # Route 1: Simple single-step sequential approval
+  simple_expense_approval:
+    name:
+      de: "Einfache Spesenfreigabe"
+      en: "Simple Expense Approval"
+    description:
+      de: "Einstufiger Genehmigungsprozess durch den direkten Vorgesetzten"
+      en: "Single-step approval process by direct supervisor"
+    default_lang: "de"
+    steps:
+      - id: "team_lead_review"
+        name:
+          de: "Teamleiter-Prüfung"
+          en: "Team Lead Review"
+        type: "sequential"
+        approvers:
+          - "mm_user_id_teamlead_01"
+        on_reject: "return_to_initiator"
+
+  # Route 2: Multi-step approval combining sequential and parallel stages
+  contract_approval_multistep:
+    name:
+      de: "Mehrstufige Vertragsfreigabe"
+      en: "Multi-Step Contract Approval"
+    description:
+      de: "Sequenzielle Vorprüfung gefolgt von paralleler Freigabe durch Recht & Finanzen sowie Geschäftsführung"
+      en: "Sequential pre-check followed by parallel Legal & Finance review and Executive sign-off"
+    default_lang: "de"
+    steps:
+      - id: "department_head"
+        name:
+          de: "Abteilungsleiter"
+          en: "Department Head"
+        type: "sequential"
+        approvers:
+          - "mm_user_id_dept_head_01"
+        on_reject: "return_to_initiator"
+
+      - id: "legal_and_finance"
+        name:
+          de: "Rechts- und Finanzprüfung (Parallel)"
+          en: "Legal & Finance Review (Parallel)"
+        type: "parallel"
+        approvers:
+          - "mm_user_id_legal_01"
+          - "mm_user_id_finance_01"
+        on_reject: "return_to_initiator"
+
+      - id: "executive_signoff"
+        name:
+          de: "Geschäftsführung"
+          en: "Executive Sign-off"
+        type: "sequential"
+        approvers:
+          - "mm_user_id_ceo_01"
+        on_reject: "return_to_initiator"
