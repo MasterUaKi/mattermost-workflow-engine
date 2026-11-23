@@ -22,7 +22,7 @@ workflows:
           de: "Teamleiter-Prüfung"
         type: "sequential"
         approvers:
-          - "mm_user_id_teamlead_01"
+          - "pbtc1k7ztfnxxxfejisp1fq1kc"
         on_reject: "return_to_initiator"
 
   # Route 2: Multi-step approval combining sequential and parallel stages
@@ -41,7 +41,7 @@ workflows:
           de: "Abteilungsleiter"
         type: "sequential"
         approvers:
-          - "mm_user_id_dept_head_01"
+          - "fjga55qpzfbeujnew873etdnde"
         on_reject: "return_to_initiator"
 
       - id: "legal_and_finance"
@@ -50,8 +50,8 @@ workflows:
           de: "Rechts- und Finanzprüfung (Parallel)"
         type: "parallel"
         approvers:
-          - "mm_user_id_legal_01"
-          - "mm_user_id_finance_01"
+          - "wqpik6bewi8mzcphfwotzxnrta"
+          - "xsf4wd73x7yezyuuums5fhakza"
         on_reject: "return_to_initiator"
 
       - id: "executive_signoff"
@@ -60,5 +60,5 @@ workflows:
           de: "Geschäftsführung"
         type: "sequential"
         approvers:
-          - "mm_user_id_ceo_01"
+          - "3j1quqyrifb93p6xcto9bcjwic"
         on_reject: "return_to_initiator"
