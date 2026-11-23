@@ -1,7 +1,7 @@
-# Author: Oleh Riabtsev
+﻿# Author: Oleh Riabtsev
 # File: scripts/stop_session.ps1
 # Created: 2026-11-23
-# Version: 1.0.0
+# Version: 1.0.1
 
 <#
 .SYNOPSIS
@@ -60,7 +60,7 @@ $Messages = @{
         push_err        = "Failed to push final changes to origin/{0}. Please check Git output above."
         stopping_docker = "Stopping local Docker containers (preserving database and Mattermost volumes)..."
         docker_stopped  = "Local Docker containers stopped."
-        session_paused  = "Development session paused. Run '.\scripts\register_autosync_task.ps1' next time to resume 5-minute auto-sync."
+        session_paused  = "Development session paused. Run '.\\scripts\\register_autosync_task.ps1' next time to resume 5-minute auto-sync."
     }
     de = @{
         stopping_task   = "Stoppe Hintergrund-Git-Auto-Sync ('{0}')..."
@@ -76,7 +76,7 @@ $Messages = @{
         push_err        = "Fehler beim Senden an origin/{0}. Bitte Git-Ausgabe pr\u00fcfen."
         stopping_docker = "Stoppe lokale Docker-Container (Datenbank- und Mattermost-Volumes bleiben erhalten)..."
         docker_stopped  = "Lokale Docker-Container wurden gestoppt."
-        session_paused  = "Entwicklungssitzung pausiert. Starten Sie beim n\u00e4chsten Mal '.\scripts\register_autosync_task.ps1'."
+        session_paused  = "Entwicklungssitzung pausiert. Starten Sie beim n\u00e4chsten Mal '.\\scripts\\register_autosync_task.ps1'."
     }
     ru = @{
         stopping_task   = "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u0444\u043e\u043d\u043e\u0432\u043e\u0433\u043e \u043c\u043e\u043d\u0438\u0442\u043e\u0440\u0438\u043d\u0433\u0430 Git ('{0}')..."
@@ -92,7 +92,7 @@ $Messages = @{
         push_err        = "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0435 \u0432 origin/{0}. \u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0432\u044b\u0432\u043e\u0434 Git \u0432\u044b\u0448\u0435."
         stopping_docker = "\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u043b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0445 Docker-\u043a\u043e\u043d\u0442\u0435\u0439\u043d\u0435\u0440\u043e\u0432 (\u0441 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0435\u043c \u0442\u043e\u043c\u043e\u0432 \u0411\u0414 \u0438 Mattermost)..."
         docker_stopped  = "\u041b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0435 Docker-\u043a\u043e\u043d\u0442\u0435\u0439\u043d\u0435\u0440\u044b \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u044b."
-        session_paused  = "\u0420\u0430\u0431\u043e\u0442\u0430 \u043f\u043e \u043f\u0440\u043e\u0435\u043a\u0442\u0443 \u043f\u0440\u0438\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430. \u0414\u043b\u044f \u0432\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0430\u0432\u0442\u043e\u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u0438 \u0432 \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0440\u0430\u0437 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 '.\scripts\register_autosync_task.ps1'."
+        session_paused  = "\u0420\u0430\u0431\u043e\u0442\u0430 \u043f\u043e \u043f\u0440\u043e\u0435\u043a\u0442\u0443 \u043f\u0440\u0438\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430. \u0414\u043b\u044f \u0432\u043e\u0437\u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u0430\u0432\u0442\u043e\u0441\u0438\u043d\u0445\u0440\u043e\u043d\u0438\u0437\u0430\u0446\u0438\u0438 \u0432 \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0440\u0430\u0437 \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 '.\\scripts\\register_autosync_task.ps1'."
     }
 }
 
@@ -187,3 +187,4 @@ if ($StopDocker) {
 }
 
 Write-SessionLog (Get-Msg "session_paused") "INFO"
+
