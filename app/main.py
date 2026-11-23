@@ -1,12 +1,12 @@
-# Автор: Oleh Riabtsev
-# Файл: app/main.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/main.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Точка входа FastAPI-приложения.
-Инициализирует БД, клиент Mattermost, систему локализации, движок согласования
-и глобальные обработчики исключений.
+FastAPI application entrypoint.
+Initializes the database, Mattermost client, localization engine (UI + configurable console logs),
+workflow engine, and global exception handlers.
 """
 
 from collections.abc import AsyncGenerator
@@ -34,10 +34,11 @@ logger = logging.getLogger("workflow_engine.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Управляет запуском и корректным завершением ресурсов приложения."""
+    """Manages application startup and graceful shutdown of external resources."""
     translator = Translator(
         locales_path=settings.LOCALES_PATH,
         default_lang=settings.DEFAULT_LANG,
+        console_lang=settings.CONSOLE_LANG,
     )
     workflows_config = get_workflows_config()
     mm_client = MattermostClient(settings=settings, translator=translator)
@@ -55,26 +56,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         bot_id = await mm_client.get_bot_user_id()
-        logger.info(translator.t("logs.app_startup", bot_id=bot_id))
+        logger.info(translator.t_log("app_startup", bot_id=bot_id))
     except Exception as exc:
-        logger.warning(f"Mattermost connection check skipped or failed at startup: {exc}")
+        logger.warning(translator.t_log("mm_startup_check_failed", detail=str(exc)))
 
     yield
 
     await mm_client.close()
-    logger.info(translator.t("logs.app_shutdown"))
+    logger.info(translator.t_log("app_shutdown"))
 
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
 
 @app.exception_handler(MattermostAPIError)
 async def mattermost_error_handler(request: Request, exc: MattermostAPIError) -> JSONResponse:
-    """Глобальный перехватчик ошибок взаимодействия с Mattermost REST API v4."""
+    """Global exception handler for Mattermost REST API v4 communication errors."""
     translator: Translator = request.app.state.translator
     lang = request.query_params.get("lang") or settings.DEFAULT_LANG
     return JSONResponse(
@@ -88,9 +89,9 @@ async def mattermost_error_handler(request: Request, exc: MattermostAPIError) ->
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Глобальный перехватчик непредвиденных исключений."""
-    logger.exception("Unhandled server exception", exc_info=exc)
+    """Global exception handler for unexpected internal server errors."""
     translator: Translator = request.app.state.translator
+    logger.exception(translator.t_log("unhandled_exception"), exc_info=exc)
     lang = request.query_params.get("lang") or settings.DEFAULT_LANG
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -100,7 +101,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 @app.get("/health", tags=["Health"])
 async def health_check() -> dict[str, str]:
-    """Эндпоинт проверки работоспособности сервиса."""
+    """Service health check endpoint."""
     return {"status": "ok"}
 
 

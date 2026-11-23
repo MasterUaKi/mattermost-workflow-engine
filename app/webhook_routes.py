@@ -1,12 +1,12 @@
-# Автор: Oleh Riabtsev
-# Файл: app/webhook_routes.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/webhook_routes.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Обработчики обратных вызовов (Callbacks) от Mattermost:
-- POST /api/v1/mattermost/actions — нажатия интерактивных кнопок (Approve / Reject)
-- POST /api/v1/mattermost/dialogs/reject — отправка модального окна с причиной отклонения
+Mattermost callback handlers:
+- POST /api/v1/mattermost/actions — handles interactive button clicks (Approve / Reject)
+- POST /api/v1/mattermost/dialogs/reject — handles Interactive Dialog submissions with rejection reasons
 """
 
 import json
@@ -26,7 +26,7 @@ def verify_webhook_secret(
     request: Request,
     token: str | None = Query(default=None),
 ) -> None:
-    """Проверяет секретный токен в URL коллбэка, если он задан в конфигурации."""
+    """Validates the secret query token on Mattermost callback URLs when configured."""
     settings = get_settings()
     if settings.MATTERMOST_WEBHOOK_SECRET and token != settings.MATTERMOST_WEBHOOK_SECRET:
         translator: Translator = request.app.state.translator
@@ -43,7 +43,7 @@ async def mattermost_interactive_action(
     _: None = Depends(verify_webhook_secret),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Принимает события нажатия кнопок в карточке согласования Mattermost."""
+    """Receives button click events from Mattermost approval cards."""
     engine: WorkflowEngine = request.app.state.workflow_engine
     action = payload.context.get("action")
     task_id = payload.context.get("task_id")
@@ -62,7 +62,7 @@ async def mattermost_interactive_action(
             return {"ephemeral_text": ephemeral_msg}
         return {}
 
-    # При нажатии кнопки "Отклонить" открываем модальное окно (Interactive Dialog)
+    # Open an Interactive Dialog modal when the Reject button is clicked
     ephemeral_msg = await engine.open_reject_modal(
         db,
         task_id=task_id,
@@ -81,7 +81,7 @@ async def mattermost_reject_dialog_submission(
     _: None = Depends(verify_webhook_secret),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Обрабатывает отправку формы модального окна с причиной отклонения."""
+    """Processes submission of the rejection reason modal dialog."""
     if payload.cancelled:
         return {}
 
@@ -99,20 +99,20 @@ async def mattermost_reject_dialog_submission(
     if not task_id:
         return {}
 
-    # Определяем язык процесса для корректной локализации ошибки валидации поля
+    # Resolve workflow language to localize field validation errors
     task = await engine._load_task_with_workflow(db, task_id)
     lang = task.workflow.lang if task else None
 
     rejection_reason = str(payload.submission.get("rejection_reason", "")).strip()
     if not rejection_reason:
-        # Нативный формат возврата ошибки валидации в модальное окно Mattermost
+        # Native Mattermost Interactive Dialog field error response format
         return {
             "errors": {
                 "rejection_reason": translator.t("dialog.error_empty_reason", lang=lang)
             }
         }
 
-    # Получаем имя пользователя Mattermost по user_id (в dialog_submission приходит только user_id)
+    # Fetch Mattermost username by user_id (dialog_submission payload only provides user_id)
     actor_username = await engine.mm_client.get_username(payload.user_id)
 
     await engine.handle_reject_dialog_submission(

@@ -1,11 +1,11 @@
-# Автор: Oleh Riabtsev
-# Файл: app/config.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/config.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Модуль конфигурации приложения.
-Отвечает за чтение переменных окружения (.env) и валидацию структуры файла workflows.yaml.
+Application configuration module.
+Loads environment variables (.env) and validates the workflows.yaml routing structure.
 """
 
 from enum import Enum
@@ -17,18 +17,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class StepType(str, Enum):
-    """Тип выполнения этапа согласования."""
-    SEQUENTIAL = "sequential"  # Последовательное согласование (один участник за раз)
-    PARALLEL = "parallel"      # Параллельное согласование (все участники этапа одновременно)
+    """Execution mode of an approval stage."""
+    SEQUENTIAL = "sequential"  # Sequential approval (one approver at a time)
+    PARALLEL = "parallel"      # Parallel approval (all stage approvers simultaneously)
 
 
 class RejectBehavior(str, Enum):
-    """Действие при отклонении документа на этапе."""
+    """Transition action when a document is rejected at a stage."""
     RETURN_TO_INITIATOR = "return_to_initiator"
 
 
 class WorkflowStepConfig(BaseModel):
-    """Описание одного этапа маршрута согласования из workflows.yaml."""
+    """Definition of a single approval step in workflows.yaml."""
     id: str = Field(..., min_length=1)
     name: dict[str, str]
     type: StepType
@@ -37,7 +37,7 @@ class WorkflowStepConfig(BaseModel):
 
 
 class WorkflowDefinition(BaseModel):
-    """Описание конкретного шаблона маршрута согласования."""
+    """Definition of a named approval workflow template."""
     name: dict[str, str]
     description: dict[str, str] | None = None
     default_lang: str | None = None
@@ -45,13 +45,13 @@ class WorkflowDefinition(BaseModel):
 
 
 class WorkflowsConfig(BaseModel):
-    """Корневая модель файла workflows.yaml."""
-    default_lang: str = "de"
+    """Root schema for workflows.yaml."""
+    default_lang: str = "en"
     workflows: dict[str, WorkflowDefinition]
 
 
 class Settings(BaseSettings):
-    """Настройки приложения, загружаемые из переменных окружения."""
+    """Application settings loaded from environment variables."""
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     APP_NAME: str = "Mattermost Document Approval Engine"
@@ -64,19 +64,20 @@ class Settings(BaseSettings):
     WORKFLOWS_CONFIG_PATH: str = "workflows.yaml"
     LOCALES_PATH: str = "locales.yaml"
     UPLOAD_DIR: str = "uploads"
-    DEFAULT_LANG: str = "de"
+    DEFAULT_LANG: str = "en"
+    CONSOLE_LANG: str = "en"
     LOG_LEVEL: str = "INFO"
 
 
 @lru_cache
 def get_settings() -> Settings:
-    """Возвращает кешированный экземпляр настроек окружения."""
+    """Returns a cached instance of environment settings."""
     return Settings()
 
 
 @lru_cache
 def get_workflows_config() -> WorkflowsConfig:
-    """Загружает и валидирует конфигурацию маршрутов из YAML-файла."""
+    """Loads and validates workflow routing definitions from the YAML file."""
     settings = get_settings()
     config_path = Path(settings.WORKFLOWS_CONFIG_PATH)
     if not config_path.exists():

@@ -1,12 +1,12 @@
-# Автор: Oleh Riabtsev
-# Файл: app/api_routes.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/api_routes.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Внешний REST API системы согласования документов:
-- POST /api/v1/workflows/start — запуск нового процесса согласования (с поддержкой файлов)
-- GET /api/v1/workflows/{workflow_id} — получение статуса и полной истории действий
+External REST API endpoints for the Document Approval Workflow Engine:
+- POST /api/v1/workflows/start — starts a new workflow instance with optional attachments
+- GET /api/v1/workflows/{workflow_id} — returns current workflow status and complete action history
 """
 
 import json
@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.i18n import SUPPORTED_LANGUAGES, Translator
+from app.i18n import Translator, UI_SUPPORTED_LANGUAGES
 from app.schemas import WorkflowDetailResponse, WorkflowStartResponse
 from app.workflow_engine import WorkflowEngine, WorkflowEngineError
 
@@ -25,12 +25,12 @@ router = APIRouter(prefix="/api/v1/workflows", tags=["Workflows"])
 
 
 def get_engine(request: Request) -> WorkflowEngine:
-    """Извлекает экземпляр WorkflowEngine из состояния приложения FastAPI."""
+    """Retrieves the WorkflowEngine instance from FastAPI application state."""
     return request.app.state.workflow_engine
 
 
 def get_translator(request: Request) -> Translator:
-    """Извлекает экземпляр Translator из состояния приложения FastAPI."""
+    """Retrieves the Translator instance from FastAPI application state."""
     return request.app.state.translator
 
 
@@ -40,19 +40,19 @@ def get_translator(request: Request) -> Translator:
     status_code=status.HTTP_201_CREATED,
 )
 async def start_workflow_endpoint(
-    workflow_type: str = Form(..., description="Идентификатор маршрута из workflows.yaml"),
-    title: str = Form(..., description="Заголовок документа"),
-    initiator_id: str = Form(..., description="Mattermost User ID инициатора"),
-    description: str | None = Form(default=None, description="Описание документа"),
-    lang: str | None = Form(default=None, description="Язык уведомлений: de или en"),
-    document_data: str = Form(default="{}", description="JSON-строка с метаданными документа"),
-    files: list[UploadFile] = File(default=[], description="Прикрепляемые файлы документа"),
+    workflow_type: str = Form(..., description="Workflow route identifier from workflows.yaml"),
+    title: str = Form(..., description="Document title"),
+    initiator_id: str = Form(..., description="Mattermost User ID of the initiator"),
+    description: str | None = Form(default=None, description="Optional document description"),
+    lang: str | None = Form(default=None, description="Notification language: en or de (defaults to en)"),
+    document_data: str = Form(default="{}", description="JSON object string containing document metadata"),
+    files: list[UploadFile] = File(default=[], description="Document files to attach"),
     db: AsyncSession = Depends(get_db),
     engine: WorkflowEngine = Depends(get_engine),
     translator: Translator = Depends(get_translator),
 ) -> WorkflowStartResponse:
-    """Запускает новый экземпляр процесса согласования документа."""
-    if lang is not None and lang.lower() not in SUPPORTED_LANGUAGES:
+    """Starts a new document approval workflow instance."""
+    if lang is not None and lang.lower() not in UI_SUPPORTED_LANGUAGES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=translator.t("api.err_unsupported_lang", requested_lang=lang),
@@ -68,7 +68,7 @@ async def start_workflow_endpoint(
             detail=translator.t("api.err_invalid_json_metadata", lang=lang),
         )
 
-    # Сохраняем загруженные файлы во временное хранилище для отправки в Mattermost
+    # Persist uploaded files locally before dispatching to Mattermost
     settings = get_settings()
     upload_dir = Path(settings.UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -126,7 +126,7 @@ async def get_workflow_status_endpoint(
     engine: WorkflowEngine = Depends(get_engine),
     translator: Translator = Depends(get_translator),
 ) -> WorkflowDetailResponse:
-    """Возвращает текущий статус процесса согласования и полную историю действий."""
+    """Returns the current approval workflow status and complete action history."""
     try:
         instance = await engine.get_workflow_details(db, workflow_id)
     except WorkflowEngineError as exc:

@@ -1,11 +1,11 @@
-# Автор: Oleh Riabtsev
-# Файл: app/models.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/models.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Модели базы данных SQLAlchemy 2.0 для хранения состояния процессов согласования,
-индивидуальных задач проверяющих, вложений и журнала аудита.
+SQLAlchemy 2.0 ORM models for persisting workflow instances, individual approver tasks,
+document attachments, and immutable audit logs.
 """
 
 from datetime import datetime, timezone
@@ -17,12 +17,12 @@ from app.database import Base
 
 
 def utc_now() -> datetime:
-    """Возвращает текущее время в часовом поясе UTC."""
+    """Returns the current UTC timestamp."""
     return datetime.now(timezone.utc)
 
 
 class WorkflowStatus(str, Enum):
-    """Жизненный цикл экземпляра процесса согласования."""
+    """Lifecycle status of a workflow instance."""
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
     APPROVED = "APPROVED"
@@ -30,7 +30,7 @@ class WorkflowStatus(str, Enum):
 
 
 class TaskStatus(str, Enum):
-    """Статус отдельной задачи согласования, назначенной конкретному пользователю."""
+    """Status of an individual approval task assigned to an approver."""
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
@@ -38,7 +38,7 @@ class TaskStatus(str, Enum):
 
 
 class WorkflowInstance(Base):
-    """Экземпляр запущенного процесса согласования документа."""
+    """Represents a running or completed document approval workflow instance."""
     __tablename__ = "workflow_instances"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -47,7 +47,7 @@ class WorkflowInstance(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     document_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     initiator_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    lang: Mapped[str] = mapped_column(String(5), nullable=False, default="de")
+    lang: Mapped[str] = mapped_column(String(5), nullable=False, default="en")
     status: Mapped[WorkflowStatus] = mapped_column(
         SQLEnum(WorkflowStatus), nullable=False, default=WorkflowStatus.IN_PROGRESS
     )
@@ -57,7 +57,7 @@ class WorkflowInstance(Base):
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
-    # Связи с дочерними таблицами
+    # Relationships to child tables
     tasks: Mapped[list["ApprovalTask"]] = relationship(
         back_populates="workflow",
         cascade="all, delete-orphan",
@@ -72,7 +72,7 @@ class WorkflowInstance(Base):
 
 
 class ApprovalTask(Base):
-    """Задача согласования для конкретного согласующего на определенном этапе."""
+    """Represents an approval task assigned to a specific user at a workflow step."""
     __tablename__ = "approval_tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -83,7 +83,7 @@ class ApprovalTask(Base):
     step_id: Mapped[str] = mapped_column(String(100), nullable=False)
     approver_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
-    # Идентификаторы личного канала и поста в Mattermost для последующего обновления карточки
+    # Mattermost DM channel and post IDs used for updating interactive cards
     dm_channel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     post_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
@@ -98,7 +98,7 @@ class ApprovalTask(Base):
 
 
 class DocumentAttachment(Base):
-    """Метаданные прикрепленных файлов документа, сохраненных на диске."""
+    """Metadata for document files uploaded and stored on disk."""
     __tablename__ = "document_attachments"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -115,7 +115,7 @@ class DocumentAttachment(Base):
 
 
 class AuditLog(Base):
-    """Неизменяемый журнал истории всех действий по процессу согласования."""
+    """Immutable audit log recording all actions across a workflow lifecycle."""
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

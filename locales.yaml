@@ -1,57 +1,7 @@
 # Author: Oleh Riabtsev
 # File: locales.yaml
 # Created: 2026-11-23
-# Version: 1.0.0
-
-de:
-  card:
-    pretext_new: "📄 **Neue Genehmigungsanfrage**"
-    field_workflow: "Prozess"
-    field_step: "Aktueller Schritt"
-    field_initiator: "Antragsteller"
-    field_document_id: "Vorgangs-ID"
-    field_description: "Beschreibung"
-    field_metadata: "Dokumentdaten"
-    btn_approve: "✅ Genehmigen"
-    btn_reject: "❌ Ablehnen"
-    status_approved: "✅ **Genehmigt** von @{username} am {timestamp} UTC"
-    status_rejected: "❌ **Abgelehnt** von @{username} am {timestamp} UTC"
-    status_cancelled: "⚪ **Storniert** (Vorgang wurde bereits in einem anderen Zweig beendet)"
-    rejection_reason_label: "**Ablehnungsgrund:** {reason}"
-  dialog:
-    reject_title: "Dokument ablehnen"
-    reject_intro: "Bitte geben Sie eine verbindliche Begründung für die Ablehnung an. Der Antragsteller wird benachrichtigt."
-    reason_label: "Ablehnungsgrund"
-    reason_placeholder: "z. B. Budgetüberschreitung oder fehlende Vertragsanlage..."
-    submit_label: "Ablehnung bestätigen"
-    error_empty_reason: "Der Ablehnungsgrund darf nicht leer sein."
-  dm:
-    workflow_approved_subject: "✅ Genehmigungsprozess erfolgreich abgeschlossen"
-    workflow_approved_body: "Ihr Dokument **{title}** (`{workflow_id}`) im Prozess **{workflow_name}** wurde vollständig genehmigt."
-    workflow_rejected_subject: "❌ Genehmigungsprozess abgelehnt"
-    workflow_rejected_body: "Ihr Dokument **{title}** (`{workflow_id}`) im Prozess **{workflow_name}** wurde im Schritt **{step_name}** von @{username} abgelehnt.\n\n**Begründung:** {reason}"
-  ephemeral:
-    not_authorized: "⛔ Sie sind nicht berechtigt, diese Genehmigungsaufgabe zu bearbeiten."
-    already_processed: "ℹ️ Diese Aufgabe wurde bereits bearbeitet (Status: {status})."
-    workflow_not_active: "ℹ️ Dieser Genehmigungsprozess ist nicht mehr aktiv."
-  api:
-    workflow_started: "Genehmigungsprozess wurde erfolgreich gestartet."
-    err_workflow_not_found: "Genehmigungsprozess mit der ID '{workflow_id}' wurde nicht gefunden."
-    err_unknown_workflow_type: "Unbekannter Prozesstyp '{workflow_type}'."
-    err_unsupported_lang: "Nicht unterstützte Sprache '{requested_lang}'. Erlaubt sind: de, en."
-    err_invalid_json_metadata: "Ungültiges JSON-Format im Feld 'document_data'."
-    err_unauthorized_webhook: "Ungültiges Webhook-Sicherheitstoken."
-    err_mattermost_api: "Fehler bei der Kommunikation mit der Mattermost API: {detail}"
-    err_internal: "Interner Serverfehler bei der Verarbeitung der Anfrage."
-  logs:
-    app_startup: "Workflow Engine gestartet. Bot-Benutzer-ID: {bot_id}"
-    app_shutdown: "Workflow Engine wird heruntergefahren."
-    workflow_started: "Prozess {workflow_id} (Typ: {workflow_type}, Sprache: {workflow_lang}) von {initiator_id} gestartet."
-    step_dispatched: "Schritt '{step_id}' (Index {step_index}) für Prozess {workflow_id} an {count} Prüfer gesendet."
-    task_approved: "Aufgabe {task_id} (Prozess {workflow_id}) von {actor_id} genehmigt."
-    task_rejected: "Aufgabe {task_id} (Prozess {workflow_id}) von {actor_id} abgelehnt. Grund: {reason}"
-    workflow_completed: "Prozess {workflow_id} wurde mit Status {status} abgeschlossen."
-    mm_api_error: "Mattermost API Fehler auf Endpunkt {endpoint} (HTTP {status_code}): {message}"
+# Version: 1.1.0
 
 en:
   card:
@@ -88,7 +38,7 @@ en:
     workflow_started: "Approval workflow started successfully."
     err_workflow_not_found: "Workflow instance with ID '{workflow_id}' was not found."
     err_unknown_workflow_type: "Unknown workflow type '{workflow_type}'."
-    err_unsupported_lang: "Unsupported language '{requested_lang}'. Allowed values: de, en."
+    err_unsupported_lang: "Unsupported language '{requested_lang}'. Allowed values: en, de."
     err_invalid_json_metadata: "Invalid JSON format in 'document_data' field."
     err_unauthorized_webhook: "Invalid webhook security token."
     err_mattermost_api: "Error communicating with Mattermost API: {detail}"
@@ -96,9 +46,76 @@ en:
   logs:
     app_startup: "Workflow Engine started. Bot User ID: {bot_id}"
     app_shutdown: "Workflow Engine shutting down."
+    mm_startup_check_failed: "Mattermost connection check skipped or failed at startup: {detail}"
+    unhandled_exception: "Unhandled server exception occurred."
     workflow_started: "Workflow {workflow_id} (type: {workflow_type}, lang: {workflow_lang}) started by {initiator_id}."
     step_dispatched: "Step '{step_id}' (index {step_index}) for workflow {workflow_id} dispatched to {count} approvers."
     task_approved: "Task {task_id} (workflow {workflow_id}) approved by {actor_id}."
     task_rejected: "Task {task_id} (workflow {workflow_id}) rejected by {actor_id}. Reason: {reason}"
     workflow_completed: "Workflow {workflow_id} finished with status {status}."
     mm_api_error: "Mattermost API error on endpoint {endpoint} (HTTP {status_code}): {message}"
+
+de:
+  card:
+    pretext_new: "📄 **Neue Genehmigungsanfrage**"
+    field_workflow: "Prozess"
+    field_step: "Aktueller Schritt"
+    field_initiator: "Antragsteller"
+    field_document_id: "Vorgangs-ID"
+    field_description: "Beschreibung"
+    field_metadata: "Dokumentdaten"
+    btn_approve: "✅ Genehmigen"
+    btn_reject: "❌ Ablehnen"
+    status_approved: "✅ **Genehmigt** von @{username} am {timestamp} UTC"
+    status_rejected: "❌ **Abgelehnt** von @{username} am {timestamp} UTC"
+    status_cancelled: "⚪ **Storniert** (Vorgang wurde bereits in einem anderen Zweig beendet)"
+    rejection_reason_label: "**Ablehnungsgrund:** {reason}"
+  dialog:
+    reject_title: "Dokument ablehnen"
+    reject_intro: "Bitte geben Sie eine verbindliche Begründung für die Ablehnung an. Der Antragsteller wird benachrichtigt."
+    reason_label: "Ablehnungsgrund"
+    reason_placeholder: "z. B. Budgetüberschreitung oder fehlende Vertragsanlage..."
+    submit_label: "Ablehnung bestätigen"
+    error_empty_reason: "Der Ablehnungsgrund darf nicht leer sein."
+  dm:
+    workflow_approved_subject: "✅ Genehmigungsprozess erfolgreich abgeschlossen"
+    workflow_approved_body: "Ihr Dokument **{title}** (`{workflow_id}`) im Prozess **{workflow_name}** wurde vollständig genehmigt."
+    workflow_rejected_subject: "❌ Genehmigungsprozess abgelehnt"
+    workflow_rejected_body: "Ihr Dokument **{title}** (`{workflow_id}`) im Prozess **{workflow_name}** wurde im Schritt **{step_name}** von @{username} abgelehnt.\n\n**Begründung:** {reason}"
+  ephemeral:
+    not_authorized: "⛔ Sie sind nicht berechtigt, diese Genehmigungsaufgabe zu bearbeiten."
+    already_processed: "ℹ️ Diese Aufgabe wurde bereits bearbeitet (Status: {status})."
+    workflow_not_active: "ℹ️ Dieser Genehmigungsprozess ist nicht mehr aktiv."
+  api:
+    workflow_started: "Genehmigungsprozess wurde erfolgreich gestartet."
+    err_workflow_not_found: "Genehmigungsprozess mit der ID '{workflow_id}' wurde nicht gefunden."
+    err_unknown_workflow_type: "Unbekannter Prozesstyp '{workflow_type}'."
+    err_unsupported_lang: "Nicht unterstützte Sprache '{requested_lang}'. Erlaubt sind: en, de."
+    err_invalid_json_metadata: "Ungültiges JSON-Format im Feld 'document_data'."
+    err_unauthorized_webhook: "Ungültiges Webhook-Sicherheitstoken."
+    err_mattermost_api: "Fehler bei der Kommunikation mit der Mattermost API: {detail}"
+    err_internal: "Interner Serverfehler bei der Verarbeitung der Anfrage."
+  logs:
+    app_startup: "Workflow Engine gestartet. Bot-Benutzer-ID: {bot_id}"
+    app_shutdown: "Workflow Engine wird heruntergefahren."
+    mm_startup_check_failed: "Verbindungsprüfung zu Mattermost beim Start übersprungen oder fehlgeschlagen: {detail}"
+    unhandled_exception: "Unbehandelter Serverfehler ist aufgetreten."
+    workflow_started: "Prozess {workflow_id} (Typ: {workflow_type}, Sprache: {workflow_lang}) von {initiator_id} gestartet."
+    step_dispatched: "Schritt '{step_id}' (Index {step_index}) für Prozess {workflow_id} an {count} Prüfer gesendet."
+    task_approved: "Aufgabe {task_id} (Prozess {workflow_id}) von {actor_id} genehmigt."
+    task_rejected: "Aufgabe {task_id} (Prozess {workflow_id}) von {actor_id} abgelehnt. Grund: {reason}"
+    workflow_completed: "Prozess {workflow_id} wurde mit Status {status} abgeschlossen."
+    mm_api_error: "Mattermost API Fehler auf Endpunkt {endpoint} (HTTP {status_code}): {message}"
+
+ru:
+  logs:
+    app_startup: "Движок согласования запущен. ID учетной записи бота: {bot_id}"
+    app_shutdown: "Завершение работы движка согласования."
+    mm_startup_check_failed: "Проверка подключения к Mattermost при запуске пропущена или завершилась ошибкой: {detail}"
+    unhandled_exception: "Произошла необработанная ошибка сервера."
+    workflow_started: "Процесс {workflow_id} (тип: {workflow_type}, язык: {workflow_lang}) запущен пользователем {initiator_id}."
+    step_dispatched: "Этап '{step_id}' (индекс {step_index}) процесса {workflow_id} отправлен {count} согласующим."
+    task_approved: "Задача {task_id} (процесс {workflow_id}) согласована пользователем {actor_id}."
+    task_rejected: "Задача {task_id} (процесс {workflow_id}) отклонена пользователем {actor_id}. Причина: {reason}"
+    workflow_completed: "Процесс {workflow_id} завершен со статусом {status}."
+    mm_api_error: "Ошибка Mattermost API на эндпоинте {endpoint} (HTTP {status_code}): {message}"

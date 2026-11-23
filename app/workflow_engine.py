@@ -1,12 +1,12 @@
-# Автор: Oleh Riabtsev
-# Файл: app/workflow_engine.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/workflow_engine.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Ядро системы согласования документов (Workflow Engine).
-Управляет жизненным циклом процесса, последовательными и параллельными этапами,
-обновлением карточек Mattermost и уведомлениями инициатора.
+Core Document Approval Workflow Engine (FSM).
+Manages workflow lifecycle transitions, sequential and parallel approval stages,
+Mattermost card updates, and initiator notifications.
 """
 
 from datetime import datetime, timezone
@@ -33,7 +33,7 @@ logger = logging.getLogger("workflow_engine.core")
 
 
 class WorkflowEngineError(Exception):
-    """Базовое доменное исключение движка согласования."""
+    """Base domain exception raised by the workflow engine."""
 
     def __init__(self, message_key: str, status_code: int = 400, **kwargs: Any) -> None:
         self.message_key = message_key
@@ -43,7 +43,7 @@ class WorkflowEngineError(Exception):
 
 
 class WorkflowEngine:
-    """Конечный автомат (FSM) маршрутизации согласования документов."""
+    """Finite State Machine (FSM) orchestrating document approval workflows."""
 
     def __init__(
         self,
@@ -68,8 +68,8 @@ class WorkflowEngine:
         saved_files: list[dict[str, Any]],
     ) -> WorkflowInstance:
         """
-        Создает экземпляр процесса согласования, сохраняет вложения в БД
-        и запускает первый этап маршрута.
+        Creates a new workflow instance, persists attachment metadata,
+        and dispatches the initial workflow stage.
         """
         wf_def = self.workflows_config.workflows.get(workflow_type)
         if not wf_def:
@@ -92,9 +92,9 @@ class WorkflowEngine:
             current_step_index=0,
         )
         db.add(instance)
-        await db.flush()  # Получаем сгенерированный instance.id
+        await db.flush()  # Obtain generated instance.id
 
-        # Регистрируем прикрепленные файлы
+        # Register uploaded file metadata
         for file_meta in saved_files:
             attachment = DocumentAttachment(
                 workflow_id=instance.id,
@@ -117,14 +117,13 @@ class WorkflowEngine:
         )
         await db.flush()
 
-        # Запускаем первый этап (индекс 0)
+        # Dispatch the first step (index 0)
         await self._dispatch_step(db, instance, step_index=0, initiator_username=initiator_username)
         await db.commit()
 
         logger.info(
-            self.translator.t(
-                "logs.workflow_started",
-                lang=effective_lang,
+            self.translator.t_log(
+                "workflow_started",
                 workflow_id=instance.id,
                 workflow_type=workflow_type,
                 workflow_lang=effective_lang,
@@ -134,7 +133,7 @@ class WorkflowEngine:
         return await self.get_workflow_details(db, instance.id)
 
     async def get_workflow_details(self, db: AsyncSession, workflow_id: str) -> WorkflowInstance:
-        """Загружает полную информацию о процессе вместе со всеми задачами, файлами и историей."""
+        """Loads complete workflow state including tasks, attachments, and audit history."""
         stmt = (
             select(WorkflowInstance)
             .where(WorkflowInstance.id == workflow_id)
@@ -160,8 +159,8 @@ class WorkflowEngine:
         initiator_username: str | None = None,
     ) -> None:
         """
-        Рассылает карточки согласования участникам этапа.
-        Для sequential отправляет первому согласующему; для parallel — всем участникам этапа сразу.
+        Dispatches approval cards to stage participants.
+        Sends to the first approver for sequential steps, or to all approvers for parallel steps.
         """
         wf_def = self.workflows_config.workflows[instance.workflow_type]
         step_cfg: WorkflowStepConfig = wf_def.steps[step_index]
@@ -173,13 +172,12 @@ class WorkflowEngine:
         workflow_name = self.translator.get_localized_dict_value(wf_def.name, lang)
         step_name = self.translator.get_localized_dict_value(step_cfg.name, lang)
 
-        # Загружаем вложения процесса из БД для последующей отправки в каждый DM-канал
+        # Load workflow attachments for upload into each approver's DM channel
         att_result = await db.execute(
             select(DocumentAttachment).where(DocumentAttachment.workflow_id == instance.id)
         )
         attachments = list(att_result.scalars().all())
 
-        # Определяем целевых согласующих: для sequential на старте этапа берем первого (approver_index=0)
         target_approvers = (
             [step_cfg.approvers[0]]
             if step_cfg.type.value == "sequential"
@@ -209,9 +207,8 @@ class WorkflowEngine:
         )
 
         logger.info(
-            self.translator.t(
-                "logs.step_dispatched",
-                lang=lang,
+            self.translator.t_log(
+                "step_dispatched",
                 step_id=step_cfg.id,
                 step_index=step_index,
                 workflow_id=instance.id,
@@ -232,7 +229,7 @@ class WorkflowEngine:
         initiator_username: str,
         attachments: list[DocumentAttachment],
     ) -> ApprovalTask:
-        """Создает запись задачи в БД и отправляет интерактивную карточку в личный канал Mattermost."""
+        """Creates a task record in the database and posts an interactive card to Mattermost DM."""
         task = ApprovalTask(
             workflow_id=instance.id,
             step_index=step_index,
@@ -245,7 +242,7 @@ class WorkflowEngine:
 
         dm_channel_id = await self.mm_client.get_or_create_direct_channel(approver_id)
 
-        # Загружаем прикрепленные файлы в личный канал согласующего
+        # Upload attached files into the approver's Direct Message channel
         mm_file_ids: list[str] = []
         for att in attachments:
             file_path = Path(att.storage_path)
@@ -291,8 +288,8 @@ class WorkflowEngine:
         actor_username: str,
     ) -> str | None:
         """
-        Обрабатывает нажатие кнопки 'Согласовать'.
-        Возвращает текст ephemeral-сообщения в случае ошибки прав/статуса или None при успехе.
+        Handles clicking the 'Approve' button.
+        Returns an ephemeral warning message on authorization/state mismatch, or None on success.
         """
         task = await self._load_task_with_workflow(db, task_id)
         if not task:
@@ -325,7 +322,7 @@ class WorkflowEngine:
             )
         )
 
-        # Обновляем исходный пост в Mattermost: убираем кнопки и фиксируем статус согласования
+        # Update the original Mattermost post: remove action buttons and display approval status
         wf_def = self.workflows_config.workflows[workflow.workflow_type]
         step_cfg = wf_def.steps[task.step_index]
         initiator_username = await self.mm_client.get_username(workflow.initiator_id)
@@ -355,17 +352,15 @@ class WorkflowEngine:
             await self.mm_client.update_post_card(task.post_id, updated_card)
 
         logger.info(
-            self.translator.t(
-                "logs.task_approved",
-                lang=lang,
+            self.translator.t_log(
+                "task_approved",
                 task_id=task.id,
                 workflow_id=workflow.id,
                 actor_id=actor_user_id,
             )
         )
 
-        # Проверяем, нужно ли отправить задачу следующему участнику внутри sequential-этапа
-        # или переходить на следующий этап маршрута
+        # Advance to the next approver in a sequential stage or to the next workflow step
         await self._advance_after_approval(db, workflow, step_cfg, initiator_username)
         await db.commit()
         return None
@@ -377,7 +372,7 @@ class WorkflowEngine:
         step_cfg: WorkflowStepConfig,
         initiator_username: str,
     ) -> None:
-        """Вычисляет следующий переход конечного автомата после согласования задачи."""
+        """Evaluates the next FSM transition after a task approval."""
         wf_def = self.workflows_config.workflows[workflow.workflow_type]
         step_index = workflow.current_step_index
 
@@ -389,7 +384,7 @@ class WorkflowEngine:
         )
         step_tasks = list(step_tasks_res.scalars().all())
 
-        # Если этап sequential и в списке approvers этапа указано несколько человек по очереди
+        # If sequential stage has multiple ordered approvers, dispatch the next approver in line
         if step_cfg.type.value == "sequential":
             approved_approvers = {t.approver_id for t in step_tasks if t.status == TaskStatus.APPROVED}
             remaining_approvers = [a for a in step_cfg.approvers if a not in approved_approvers]
@@ -410,11 +405,11 @@ class WorkflowEngine:
                 )
                 return
 
-        # Для parallel-этапа ждем, пока ВСЕ задачи текущего этапа перейдут в APPROVED
+        # For parallel stages, wait until ALL tasks in the current stage are APPROVED
         if not all(t.status == TaskStatus.APPROVED for t in step_tasks):
             return
 
-        # Все согласующие текущего этапа одобрили документ — проверяем наличие следующего этапа
+        # All stage approvers have approved — check if another step follows
         next_step_index = step_index + 1
         if next_step_index < len(wf_def.steps):
             workflow.current_step_index = next_step_index
@@ -422,7 +417,7 @@ class WorkflowEngine:
                 db, workflow, step_index=next_step_index, initiator_username=initiator_username
             )
         else:
-            # Финальный этап пройден: закрываем процесс со статусом APPROVED и уведомляем инициатора
+            # Final stage completed: mark workflow APPROVED and notify the initiator
             workflow.status = WorkflowStatus.APPROVED
             db.add(
                 AuditLog(
@@ -447,9 +442,8 @@ class WorkflowEngine:
                 color="#28A745",
             )
             logger.info(
-                self.translator.t(
-                    "logs.workflow_completed",
-                    lang=workflow.lang,
+                self.translator.t_log(
+                    "workflow_completed",
                     workflow_id=workflow.id,
                     status=WorkflowStatus.APPROVED.value,
                 )
@@ -463,7 +457,7 @@ class WorkflowEngine:
         actor_user_id: str,
         trigger_id: str,
     ) -> str | None:
-        """Проверяет права и открывает модальное окно ввода причины отклонения в Mattermost."""
+        """Validates permissions and opens the rejection reason modal dialog in Mattermost."""
         task = await self._load_task_with_workflow(db, task_id)
         if not task:
             return self.translator.t("ephemeral.workflow_not_active")
@@ -500,8 +494,8 @@ class WorkflowEngine:
         rejection_reason: str,
     ) -> None:
         """
-        Фиксирует отклонение документа после отправки модального окна,
-        обновляет карточки в Mattermost, отменяет параллельные задачи и уведомляет инициатора.
+        Records document rejection after dialog submission, updates Mattermost cards,
+        cancels sibling parallel tasks, and notifies the initiator.
         """
         task = await self._load_task_with_workflow(db, task_id)
         if not task:
@@ -529,7 +523,7 @@ class WorkflowEngine:
         step_name = self.translator.get_localized_dict_value(step_cfg.name, lang)
         timestamp_str = now.strftime("%Y-%m-%d %H:%M")
 
-        # Обновляем карточку отклонившего пользователя (красный статус + причина отклонения)
+        # Update the rejecting approver's card with red status and rejection reason
         reject_status_line = (
             self.translator.t(
                 "card.status_rejected",
@@ -557,7 +551,7 @@ class WorkflowEngine:
             )
             await self.mm_client.update_post_card(task.post_id, rejected_card)
 
-        # Отменяем остальные открытые параллельные задачи в этом процессе и убираем с них кнопки
+        # Cancel any remaining open parallel tasks and remove their buttons
         other_pending_res = await db.execute(
             select(ApprovalTask).where(
                 ApprovalTask.workflow_id == workflow.id,
@@ -604,7 +598,7 @@ class WorkflowEngine:
             )
         )
 
-        # Уведомляем инициатора в личные сообщения с указанием причины отклонения
+        # Notify the initiator via Direct Message with the rejection reason
         subject = self.translator.t("dm.workflow_rejected_subject", lang)
         body = self.translator.t(
             "dm.workflow_rejected_body",
@@ -626,9 +620,8 @@ class WorkflowEngine:
         await db.commit()
 
         logger.info(
-            self.translator.t(
-                "logs.task_rejected",
-                lang=lang,
+            self.translator.t_log(
+                "task_rejected",
                 task_id=task.id,
                 workflow_id=workflow.id,
                 actor_id=actor_user_id,
@@ -638,7 +631,7 @@ class WorkflowEngine:
 
     @staticmethod
     async def _load_task_with_workflow(db: AsyncSession, task_id: str) -> ApprovalTask | None:
-        """Загружает задачу согласования вместе с родительским процессом."""
+        """Loads an approval task together with its parent workflow instance."""
         stmt = (
             select(ApprovalTask)
             .where(ApprovalTask.id == task_id)

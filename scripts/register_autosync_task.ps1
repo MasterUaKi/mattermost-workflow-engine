@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: scripts/register_autosync_task.ps1
 # Created: 2026-11-23
-# Version: 1.0.1
+# Version: 1.1.0
 
 <#
 .SYNOPSIS

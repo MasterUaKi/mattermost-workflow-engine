@@ -1,11 +1,11 @@
-# Автор: Oleh Riabtsev
-# Файл: app/schemas.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/schemas.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Pydantic v2 схемы для валидации запросов и ответов REST API системы,
-а также входящих событий от Interactive Message Buttons и Interactive Dialogs Mattermost.
+Pydantic v2 schemas for validating REST API requests and responses,
+as well as incoming Mattermost Interactive Message Button and Dialog payloads.
 """
 
 from datetime import datetime
@@ -13,10 +13,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# --- Схемы REST API самой системы ---
+# --- System REST API Schemas ---
 
 class WorkflowStartResponse(BaseModel):
-    """Ответ эндпоинта POST /api/v1/workflows/start."""
+    """Response schema for POST /api/v1/workflows/start."""
     workflow_id: str
     workflow_type: str
     status: str
@@ -26,7 +26,7 @@ class WorkflowStartResponse(BaseModel):
 
 
 class TaskDetailSchema(BaseModel):
-    """Детальная информация о задаче согласующего."""
+    """Detailed representation of an approval task."""
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -42,7 +42,7 @@ class TaskDetailSchema(BaseModel):
 
 
 class AttachmentDetailSchema(BaseModel):
-    """Информация о прикрепленном файле."""
+    """Metadata representation of an attached file."""
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -53,7 +53,7 @@ class AttachmentDetailSchema(BaseModel):
 
 
 class AuditLogDetailSchema(BaseModel):
-    """Запись журнала аудита."""
+    """Single entry in the workflow audit history."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -66,7 +66,7 @@ class AuditLogDetailSchema(BaseModel):
 
 
 class WorkflowDetailResponse(BaseModel):
-    """Полная карточка процесса и история действий для GET /api/v1/workflows/{id}."""
+    """Complete workflow status and audit trail for GET /api/v1/workflows/{workflow_id}."""
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -85,10 +85,10 @@ class WorkflowDetailResponse(BaseModel):
     audit_logs: list[AuditLogDetailSchema]
 
 
-# --- Схемы входящих вебхуков Mattermost ---
+# --- Mattermost Incoming Callback Schemas ---
 
 class MattermostButtonPayload(BaseModel):
-    """Полезная нагрузка при нажатии интерактивной кнопки в сообщении Mattermost."""
+    """Payload sent by Mattermost when an interactive message button is clicked."""
     user_id: str
     user_name: str
     channel_id: str
@@ -99,7 +99,7 @@ class MattermostButtonPayload(BaseModel):
 
 
 class MattermostDialogSubmissionPayload(BaseModel):
-    """Полезная нагрузка при отправке модального окна (Interactive Dialog) Mattermost."""
+    """Payload sent by Mattermost when an Interactive Dialog is submitted."""
     type: str = "dialog_submission"
     callback_id: str | None = None
     state: str | None = None

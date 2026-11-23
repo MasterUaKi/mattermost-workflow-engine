@@ -1,11 +1,11 @@
-# Автор: Oleh Riabtsev
-# Файл: app/database.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/database.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Модуль инициализации асинхронного подключения к базе данных (SQLite / PostgreSQL)
-на базе SQLAlchemy 2.0.
+Asynchronous database connection and session factory module (SQLite / PostgreSQL)
+built on SQLAlchemy 2.0.
 """
 
 from collections.abc import AsyncGenerator
@@ -15,14 +15,14 @@ from app.config import get_settings
 
 settings = get_settings()
 
-# Создаем асинхронный движок SQLAlchemy 2.0
+# Create SQLAlchemy 2.0 async engine
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     future=True,
 )
 
-# Фабрика асинхронных сессий
+# Async session factory
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
@@ -32,20 +32,20 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 class Base(DeclarativeBase):
-    """Базовый класс для всех декларативных моделей SQLAlchemy 2.0."""
+    """Base class for all declarative SQLAlchemy 2.0 models."""
     pass
 
 
 async def init_db() -> None:
-    """Создает таблицы в базе данных при старте MVP-приложения."""
-    from app import models  # noqa: F401 — импорт для регистрации метаданных моделей
+    """Creates database tables on application startup for the MVP."""
+    from app import models  # noqa: F401 — import to register ORM model metadata
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Зависимость FastAPI (Dependency Injection) для предоставления сессии БД на запрос."""
+    """FastAPI dependency providing a scoped async database session per request."""
     async with AsyncSessionLocal() as session:
         try:
             yield session

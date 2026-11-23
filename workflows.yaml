@@ -1,25 +1,25 @@
 # Author: Oleh Riabtsev
 # File: workflows.yaml
 # Created: 2026-11-23
-# Version: 1.0.0
+# Version: 1.1.0
 
-default_lang: "de"
+default_lang: "en"
 
 workflows:
   # Route 1: Simple single-step sequential approval
   simple_expense_approval:
     name:
-      de: "Einfache Spesenfreigabe"
       en: "Simple Expense Approval"
+      de: "Einfache Spesenfreigabe"
     description:
-      de: "Einstufiger Genehmigungsprozess durch den direkten Vorgesetzten"
       en: "Single-step approval process by direct supervisor"
-    default_lang: "de"
+      de: "Einstufiger Genehmigungsprozess durch den direkten Vorgesetzten"
+    default_lang: "en"
     steps:
       - id: "team_lead_review"
         name:
-          de: "Teamleiter-Prüfung"
           en: "Team Lead Review"
+          de: "Teamleiter-Prüfung"
         type: "sequential"
         approvers:
           - "mm_user_id_teamlead_01"
@@ -28,17 +28,17 @@ workflows:
   # Route 2: Multi-step approval combining sequential and parallel stages
   contract_approval_multistep:
     name:
-      de: "Mehrstufige Vertragsfreigabe"
       en: "Multi-Step Contract Approval"
+      de: "Mehrstufige Vertragsfreigabe"
     description:
-      de: "Sequenzielle Vorprüfung gefolgt von paralleler Freigabe durch Recht & Finanzen sowie Geschäftsführung"
       en: "Sequential pre-check followed by parallel Legal & Finance review and Executive sign-off"
-    default_lang: "de"
+      de: "Sequenzielle Vorprüfung gefolgt von paralleler Freigabe durch Recht & Finanzen sowie Geschäftsführung"
+    default_lang: "en"
     steps:
       - id: "department_head"
         name:
-          de: "Abteilungsleiter"
           en: "Department Head"
+          de: "Abteilungsleiter"
         type: "sequential"
         approvers:
           - "mm_user_id_dept_head_01"
@@ -46,8 +46,8 @@ workflows:
 
       - id: "legal_and_finance"
         name:
-          de: "Rechts- und Finanzprüfung (Parallel)"
           en: "Legal & Finance Review (Parallel)"
+          de: "Rechts- und Finanzprüfung (Parallel)"
         type: "parallel"
         approvers:
           - "mm_user_id_legal_01"
@@ -56,8 +56,8 @@ workflows:
 
       - id: "executive_signoff"
         name:
-          de: "Geschäftsführung"
           en: "Executive Sign-off"
+          de: "Geschäftsführung"
         type: "sequential"
         approvers:
           - "mm_user_id_ceo_01"

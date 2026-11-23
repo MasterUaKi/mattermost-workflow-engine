@@ -1,12 +1,12 @@
-# Автор: Oleh Riabtsev
-# Файл: app/mattermost_client.py
-# Дата создания: 2026-11-23
-# Версия: 1.0.0
+# Author: Oleh Riabtsev
+# File: app/mattermost_client.py
+# Created: 2026-11-23
+# Version: 1.1.0
 
 """
-Асинхронный клиент для взаимодействия с Mattermost REST API v4 на базе httpx.
-Реализует авторизацию через Bot Token, создание DM-каналов, загрузку файлов,
-отправку карточек с интерактивными кнопками, обновление постов и открытие модальных окон.
+Asynchronous client for Mattermost REST API v4 built on httpx.
+Handles Bot Token authentication, Direct Message channel creation, file uploads,
+interactive approval cards, post updates, and Interactive Dialogs.
 """
 
 import json
@@ -21,7 +21,7 @@ logger = logging.getLogger("workflow_engine.mattermost")
 
 
 class MattermostAPIError(Exception):
-    """Исключение при получении ошибки от Mattermost REST API v4."""
+    """Raised when Mattermost REST API v4 returns an HTTP error response."""
 
     def __init__(self, status_code: int, message: str, endpoint: str) -> None:
         self.status_code = status_code
@@ -31,7 +31,7 @@ class MattermostAPIError(Exception):
 
 
 class MattermostClient:
-    """Асинхронный клиент Mattermost API v4."""
+    """Asynchronous Mattermost REST API v4 client."""
 
     def __init__(self, settings: Settings, translator: Translator) -> None:
         self.settings = settings
@@ -48,11 +48,11 @@ class MattermostClient:
         )
 
     async def close(self) -> None:
-        """Закрывает пул HTTP-соединений."""
+        """Closes the underlying HTTP connection pool."""
         await self._client.aclose()
 
     def _build_callback_url(self, path: str) -> str:
-        """Формирует публичный URL для коллбэков Mattermost с опциональным секретным токеном."""
+        """Constructs a public callback URL with an optional webhook secret token."""
         base = f"{self.settings.PUBLIC_BASE_URL.rstrip('/')}{path}"
         if self.settings.MATTERMOST_WEBHOOK_SECRET:
             query = urlencode({"token": self.settings.MATTERMOST_WEBHOOK_SECRET})
@@ -60,7 +60,7 @@ class MattermostClient:
         return base
 
     async def _request(self, method: str, endpoint: str, **kwargs: Any) -> Any:
-        """Выполняет HTTP-запрос к Mattermost API v4 с единой обработкой ошибок."""
+        """Executes an HTTP request against Mattermost API v4 with unified error handling."""
         response = await self._client.request(method, endpoint, **kwargs)
         if response.status_code >= 400:
             try:
@@ -70,8 +70,8 @@ class MattermostClient:
                 detail = response.text
 
             logger.error(
-                self.translator.t(
-                    "logs.mm_api_error",
+                self.translator.t_log(
+                    "mm_api_error",
                     endpoint=endpoint,
                     status_code=response.status_code,
                     message=detail,
@@ -84,14 +84,14 @@ class MattermostClient:
         return response.json()
 
     async def get_bot_user_id(self) -> str:
-        """Получает и кеширует ID учетной записи бота (GET /api/v4/users/me)."""
+        """Retrieves and caches the bot account user ID (GET /api/v4/users/me)."""
         if self._bot_user_id is None:
             data = await self._request("GET", "/users/me")
             self._bot_user_id = data["id"]
         return self._bot_user_id
 
     async def get_username(self, user_id: str) -> str:
-        """Получает логин пользователя Mattermost по его ID (GET /api/v4/users/{user_id})."""
+        """Retrieves a Mattermost username by user ID (GET /api/v4/users/{user_id})."""
         try:
             data = await self._request("GET", f"/users/{user_id}")
             return data.get("username", user_id)
@@ -100,8 +100,8 @@ class MattermostClient:
 
     async def get_or_create_direct_channel(self, target_user_id: str) -> str:
         """
-        Создает или возвращает существующий личный канал (Direct Message)
-        между ботом и целевым пользователем (POST /api/v4/channels/direct).
+        Creates or retrieves an existing Direct Message channel
+        between the bot and the target user (POST /api/v4/channels/direct).
         """
         bot_id = await self.get_bot_user_id()
         data = await self._request("POST", "/channels/direct", json=[bot_id, target_user_id])
@@ -115,8 +115,8 @@ class MattermostClient:
         content_type: str = "application/octet-stream",
     ) -> str:
         """
-        Загружает файл в указанный канал Mattermost (POST /api/v4/files)
-        и возвращает его file_id для прикрепления к посту.
+        Uploads a file to the specified Mattermost channel (POST /api/v4/files)
+        and returns the generated file_id for post attachment.
         """
         files = {"files": (filename, content, content_type)}
         data = await self._request(
@@ -146,7 +146,7 @@ class MattermostClient:
         final_status_line: str | None = None,
         color: str = "#1E90FF",
     ) -> dict[str, Any]:
-        """Формирует структуру Message Attachment для карточки документа."""
+        """Builds a Mattermost Message Attachment payload for an approval card."""
         fields: list[dict[str, Any]] = [
             {
                 "title": self.translator.t("card.field_workflow", lang),
@@ -240,7 +240,7 @@ class MattermostClient:
         attachment: dict[str, Any],
         file_ids: list[str] | None = None,
     ) -> str:
-        """Отправляет карточку документа с интерактивными кнопками в канал (POST /api/v4/posts)."""
+        """Posts an interactive approval card to a channel (POST /api/v4/posts)."""
         payload: dict[str, Any] = {
             "channel_id": channel_id,
             "message": "",
@@ -254,8 +254,8 @@ class MattermostClient:
 
     async def update_post_card(self, post_id: str, attachment: dict[str, Any]) -> None:
         """
-        Обновляет исходный пост в Mattermost (PUT /api/v4/posts/{post_id}),
-        заменяя интерактивные кнопки на финальный текстовый статус.
+        Updates an existing Mattermost post (PUT /api/v4/posts/{post_id}),
+        replacing interactive action buttons with a final status summary.
         """
         payload = {
             "id": post_id,
@@ -271,7 +271,7 @@ class MattermostClient:
         lang: str,
     ) -> None:
         """
-        Открывает модальное окно (Interactive Dialog) с обязательным полем причины отклонения
+        Opens an Interactive Dialog with a required rejection reason textarea
         (POST /api/v4/actions/dialogs/open).
         """
         dialog_url = self._build_callback_url("/api/v1/mattermost/dialogs/reject")
@@ -307,7 +307,7 @@ class MattermostClient:
         body: str,
         color: str = "#28A745",
     ) -> str:
-        """Отправляет уведомление в личные сообщения (DM) указанному пользователю."""
+        """Sends a Direct Message notification card to the specified user."""
         channel_id = await self.get_or_create_direct_channel(user_id)
         payload = {
             "channel_id": channel_id,

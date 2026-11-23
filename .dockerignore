@@ -1,0 +1,41 @@
+# Author: Oleh Riabtsev
+# File: .dockerignore
+# Created: 2026-11-23
+# Version: 1.0.0
+
+# Git and version control
+.git/
+.gitignore
+
+# Python virtual environments and cache
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment files and SQLite databases
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime uploads, local logs, and Windows automation scripts
+uploads/*
+!uploads/.gitkeep
+logs/
+*.log
+scripts/
+
+# IDE and OS metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

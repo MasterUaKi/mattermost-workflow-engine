@@ -1,23 +1,25 @@
 <!--
-Автор: Oleh Riabtsev
-Файл: README.md
-Дата создания: 2026-11-23
-Версия: 1.0.0
+Author: Oleh Riabtsev
+File: README.md
+Created: 2026-11-23
+Version: 1.1.0
 -->
 
 # Mattermost Document Approval Workflow Engine
 
-Настраиваемая асинхронная система согласования документов (**Workflow Engine**) с интеграцией в корпоративный мессенджер **Mattermost** через REST API v4.
+A configurable asynchronous Document Approval Workflow Engine integrated with **Mattermost** via REST API v4.
 
-## Основные возможности
-- **Декларативная маршрутизация (`workflows.yaml`):** поддержка последовательных (`sequential`) и параллельных (`parallel`) этапов согласования.
-- **Интеграция с Mattermost API v4:** авторизация через Bot Account Token, отправка карточек в личные каналы (Direct Messages), загрузка вложений, обработка интерактивных кнопок (`Approve` / `Reject`) и модальных диалогов (`Interactive Dialogs`) для указания причины отклонения.
-- **Двуязычность (`de` / `en`):** полная локализация карточек, модальных окон, системных логов и ответов REST API.
-- **Внешний REST API:** запуск процессов (`POST /api/v1/workflows/start`) и получение полной истории согласования (`GET /api/v1/workflows/{id}`).
+## Key Features
+- **Declarative Routing (`workflows.yaml`):** Supports sequential (`sequential`) and parallel (`parallel`) approval stages with customizable rejection rules.
+- **Mattermost REST API v4 Integration:** Authenticates via Bot Account Token, creates Direct Message channels, uploads document attachments, renders interactive cards (`Approve` / `Reject`), and opens Interactive Dialogs for mandatory rejection reasons.
+- **Multi-Language Support:**
+  - **UI & API (`en`, `de`):** Localized Mattermost cards, modal dialogs, direct notifications, and REST API responses (defaults to `en` when unspecified).
+  - **Console & System Logs (`en`, `de`, `ru`):** Configurable via `CONSOLE_LANG` in `.env`.
+- **External REST API:** Start approval workflows (`POST /api/v1/workflows/start`) and inspect full audit history (`GET /api/v1/workflows/{workflow_id}`).
 
-## Технологический стек
+## Technology Stack
 - **Python 3.11+**
 - **FastAPI** + **Uvicorn**
 - **SQLAlchemy 2.0 (async)** + **SQLite / PostgreSQL**
-- **httpx** (асинхронный HTTP-клиент)
+- **httpx** (async HTTP client)
 - **Pydantic v2** + **PyYAML**
