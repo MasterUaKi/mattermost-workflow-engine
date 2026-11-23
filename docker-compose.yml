@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: docker-compose.yml
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.0
 
 services:
   db:
@@ -65,10 +65,11 @@ services:
     env_file:
       - .env
     environment:
-      # Internal Docker network URLs for PostgreSQL and local Mattermost
+      # Connect to the PostgreSQL service container via asyncpg
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-workflow_user}:${POSTGRES_PASSWORD:-workflow_pass}@db:5432/${POSTGRES_DB:-workflow_db}
-      MATTERMOST_URL: http://mattermost:8065
-      PUBLIC_BASE_URL: http://workflow-engine:8000
+      # Use values from .env when set (production), or fall back to internal Docker names (local lab)
+      MATTERMOST_URL: ${MATTERMOST_URL:-http://mattermost:8065}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://workflow-engine:8000}
       WORKFLOWS_CONFIG_PATH: /app/workflows.yaml
       LOCALES_PATH: /app/locales.yaml
       UPLOAD_DIR: /app/uploads
