@@ -1,12 +1,12 @@
 # Author: Oleh Riabtsev
 # File: app/workflow_engine.py
 # Created: 2026-11-23
-# Version: 1.2.0
+# Version: 1.3.0
 
 """
 Core Document Approval Workflow Engine (FSM).
 Manages workflow lifecycle transitions, sequential and parallel approval stages,
-Mattermost card updates, initiator notifications, and temporary attachment cleanup.
+conditional alternative rejection routing, Mattermost card updates, and attachment cleanup.
 """
 
 from datetime import datetime, timezone
@@ -17,7 +17,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.config import WorkflowsConfig, WorkflowStepConfig
+from app.config import (
+    RejectBehavior,
+    WorkflowDefinition,
+    WorkflowsConfig,
+    WorkflowStepConfig,
+)
 from app.i18n import Translator
 from app.mattermost_client import MattermostClient
 from app.models import (
@@ -27,6 +32,7 @@ from app.models import (
     TaskStatus,
     WorkflowInstance,
     WorkflowStatus,
+    WorkflowTemplate,
 )
 
 logger = logging.getLogger("workflow_engine.core")
@@ -55,6 +61,35 @@ class WorkflowEngine:
         self.mm_client = mm_client
         self.translator = translator
 
+    async def resolve_workflow_definition(
+        self,
+        db: AsyncSession,
+        workflow_type: str,
+    ) -> WorkflowDefinition | None:
+        """
+        Resolves a workflow definition by slug/type from the database first,
+        falling back to static workflows.yaml definitions.
+        """
+        stmt = select(WorkflowTemplate).where(WorkflowTemplate.slug == workflow_type)
+        result = await db.execute(stmt)
+        db_tpl = result.scalar_one_or_none()
+        if db_tpl:
+            return WorkflowDefinition(
+                name=db_tpl.name,
+                description=db_tpl.description or None,
+                default_lang=db_tpl.default_lang,
+                steps=[WorkflowStepConfig.model_validate(s) for s in db_tpl.steps],
+            )
+        return self.workflows_config.workflows.get(workflow_type)
+
+    @staticmethod
+    def _find_first_normal_step_index(steps: list[WorkflowStepConfig], start_from: int = 0) -> int | None:
+        """Finds the next step index that is not marked as an alternative-only rejection branch."""
+        for idx in range(start_from, len(steps)):
+            if not steps[idx].is_alternative:
+                return idx
+        return None
+
     async def start_workflow(
         self,
         db: AsyncSession,
@@ -69,14 +104,18 @@ class WorkflowEngine:
     ) -> WorkflowInstance:
         """
         Creates a new workflow instance, persists attachment metadata,
-        and dispatches the initial workflow stage. Cleans up staged files if startup fails.
+        and dispatches the initial non-alternative workflow stage.
         """
         try:
-            wf_def = self.workflows_config.workflows.get(workflow_type)
+            wf_def = await self.resolve_workflow_definition(db, workflow_type)
             if not wf_def:
                 raise WorkflowEngineError(
                     "api.err_unknown_workflow_type", status_code=404, workflow_type=workflow_type
                 )
+
+            first_step_idx = self._find_first_normal_step_index(wf_def.steps, start_from=0)
+            if first_step_idx is None:
+                first_step_idx = 0
 
             effective_lang = self.translator.normalize_lang(
                 lang or wf_def.default_lang or self.workflows_config.default_lang
@@ -90,12 +129,11 @@ class WorkflowEngine:
                 initiator_id=initiator_id,
                 lang=effective_lang,
                 status=WorkflowStatus.IN_PROGRESS,
-                current_step_index=0,
+                current_step_index=first_step_idx,
             )
             db.add(instance)
-            await db.flush()  # Obtain generated instance.id
+            await db.flush()
 
-            # Register uploaded file metadata
             for file_meta in saved_files:
                 attachment = DocumentAttachment(
                     workflow_id=instance.id,
@@ -118,11 +156,15 @@ class WorkflowEngine:
             )
             await db.flush()
 
-            # Dispatch the first step (index 0)
-            await self._dispatch_step(db, instance, step_index=0, initiator_username=initiator_username)
+            await self._dispatch_step(
+                db,
+                instance,
+                wf_def=wf_def,
+                step_index=first_step_idx,
+                initiator_username=initiator_username,
+            )
             await db.commit()
         except Exception:
-            # Remove orphaned temporary files from disk if workflow initialization fails
             for file_meta in saved_files:
                 self._remove_file_safely(
                     workflow_id="uncommitted",
@@ -164,14 +206,16 @@ class WorkflowEngine:
         self,
         db: AsyncSession,
         instance: WorkflowInstance,
+        *,
+        wf_def: WorkflowDefinition,
         step_index: int,
         initiator_username: str | None = None,
+        escalation_banner: str | None = None,
     ) -> None:
         """
         Dispatches approval cards to stage participants.
         Sends to the first approver for sequential steps, or to all approvers for parallel steps.
         """
-        wf_def = self.workflows_config.workflows[instance.workflow_type]
         step_cfg: WorkflowStepConfig = wf_def.steps[step_index]
         lang = instance.lang
 
@@ -181,7 +225,6 @@ class WorkflowEngine:
         workflow_name = self.translator.get_localized_dict_value(wf_def.name, lang)
         step_name = self.translator.get_localized_dict_value(step_cfg.name, lang)
 
-        # Load workflow attachments for upload into each approver's DM channel
         att_result = await db.execute(
             select(DocumentAttachment).where(DocumentAttachment.workflow_id == instance.id)
         )
@@ -204,6 +247,7 @@ class WorkflowEngine:
                 step_name=step_name,
                 initiator_username=initiator_username,
                 attachments=attachments,
+                escalation_banner=escalation_banner,
             )
 
         db.add(
@@ -237,6 +281,7 @@ class WorkflowEngine:
         step_name: str,
         initiator_username: str,
         attachments: list[DocumentAttachment],
+        escalation_banner: str | None = None,
     ) -> ApprovalTask:
         """Creates a task record in the database and posts an interactive card to Mattermost DM."""
         task = ApprovalTask(
@@ -251,7 +296,6 @@ class WorkflowEngine:
 
         dm_channel_id = await self.mm_client.get_or_create_direct_channel(approver_id)
 
-        # Upload attached files into the approver's Direct Message channel
         mm_file_ids: list[str] = []
         for att in attachments:
             file_path = Path(att.storage_path)
@@ -276,6 +320,7 @@ class WorkflowEngine:
             document_data=instance.document_data,
             lang=instance.lang,
             include_buttons=True,
+            escalation_banner=escalation_banner,
         )
 
         post_id = await self.mm_client.send_approval_card(
@@ -316,6 +361,10 @@ class WorkflowEngine:
         if task.status != TaskStatus.PENDING:
             return self.translator.t("ephemeral.already_processed", lang, status=task.status.value)
 
+        wf_def = await self.resolve_workflow_definition(db, workflow.workflow_type)
+        if not wf_def:
+            return self.translator.t("ephemeral.workflow_not_active", lang)
+
         now = datetime.now(timezone.utc)
         task.status = TaskStatus.APPROVED
         task.decided_at = now
@@ -331,8 +380,6 @@ class WorkflowEngine:
             )
         )
 
-        # Update the original Mattermost post: remove action buttons and display approval status
-        wf_def = self.workflows_config.workflows[workflow.workflow_type]
         step_cfg = wf_def.steps[task.step_index]
         initiator_username = await self.mm_client.get_username(workflow.initiator_id)
         timestamp_str = now.strftime("%Y-%m-%d %H:%M")
@@ -369,11 +416,9 @@ class WorkflowEngine:
             )
         )
 
-        # Advance to the next approver in a sequential stage or to the next workflow step
-        await self._advance_after_approval(db, workflow, step_cfg, initiator_username)
+        await self._advance_after_approval(db, workflow, wf_def, step_cfg, initiator_username)
         await db.commit()
 
-        # Remove temporary files from disk once the workflow reaches a terminal state
         if workflow.status in {WorkflowStatus.APPROVED, WorkflowStatus.REJECTED}:
             await self._cleanup_workflow_attachments(db, workflow.id)
 
@@ -383,17 +428,19 @@ class WorkflowEngine:
         self,
         db: AsyncSession,
         workflow: WorkflowInstance,
+        wf_def: WorkflowDefinition,
         step_cfg: WorkflowStepConfig,
         initiator_username: str,
     ) -> None:
         """Evaluates the next FSM transition after a task approval."""
-        wf_def = self.workflows_config.workflows[workflow.workflow_type]
         step_index = workflow.current_step_index
 
+        # Inspect only tasks belonging to the current dispatch wave of this step
         step_tasks_res = await db.execute(
             select(ApprovalTask).where(
                 ApprovalTask.workflow_id == workflow.id,
                 ApprovalTask.step_index == step_index,
+                ApprovalTask.status.in_([TaskStatus.PENDING, TaskStatus.APPROVED]),
             )
         )
         step_tasks = list(step_tasks_res.scalars().all())
@@ -419,19 +466,21 @@ class WorkflowEngine:
                 )
                 return
 
-        # For parallel stages, wait until ALL tasks in the current stage are APPROVED
         if not all(t.status == TaskStatus.APPROVED for t in step_tasks):
             return
 
-        # All stage approvers have approved — check if another step follows
-        next_step_index = step_index + 1
-        if next_step_index < len(wf_def.steps):
+        # Advance to the next normal (non-alternative) step in the pipeline
+        next_step_index = self._find_first_normal_step_index(wf_def.steps, start_from=step_index + 1)
+        if next_step_index is not None:
             workflow.current_step_index = next_step_index
             await self._dispatch_step(
-                db, workflow, step_index=next_step_index, initiator_username=initiator_username
+                db,
+                workflow,
+                wf_def=wf_def,
+                step_index=next_step_index,
+                initiator_username=initiator_username,
             )
         else:
-            # Final stage completed: mark workflow APPROVED and notify the initiator
             workflow.status = WorkflowStatus.APPROVED
             db.add(
                 AuditLog(
@@ -508,8 +557,9 @@ class WorkflowEngine:
         rejection_reason: str,
     ) -> None:
         """
-        Records document rejection after dialog submission, updates Mattermost cards,
-        cancels sibling parallel tasks, notifies the initiator, and cleans up temporary files.
+        Records document rejection after dialog submission.
+        Either reroutes the workflow to an alternative step configured on the stage
+        or finalizes the workflow as REJECTED and notifies the initiator.
         """
         task = await self._load_task_with_workflow(db, task_id)
         if not task:
@@ -523,24 +573,45 @@ class WorkflowEngine:
         ):
             return
 
+        wf_def = await self.resolve_workflow_definition(db, workflow.workflow_type)
+        if not wf_def:
+            return
+
         lang = workflow.lang
         now = datetime.now(timezone.utc)
         task.status = TaskStatus.REJECTED
         task.comment = rejection_reason
         task.decided_at = now
-        workflow.status = WorkflowStatus.REJECTED
 
-        wf_def = self.workflows_config.workflows[workflow.workflow_type]
         step_cfg = wf_def.steps[task.step_index]
         initiator_username = await self.mm_client.get_username(workflow.initiator_id)
         workflow_name = self.translator.get_localized_dict_value(wf_def.name, lang)
         step_name = self.translator.get_localized_dict_value(step_cfg.name, lang)
         timestamp_str = now.strftime("%Y-%m-%d %H:%M")
 
-        # Update the rejecting approver's card with red status and rejection reason
+        # Determine if an alternative rejection target step exists and loop limit is respected
+        target_step_index: int | None = None
+        if step_cfg.on_reject == RejectBehavior.GOTO_STEP and step_cfg.on_reject_step_id:
+            for idx, candidate in enumerate(wf_def.steps):
+                if candidate.id == step_cfg.on_reject_step_id:
+                    target_step_index = idx
+                    break
+
+        # Guard against infinite rejection ping-pong cycles
+        if target_step_index is not None:
+            logs_res = await db.execute(
+                select(AuditLog).where(
+                    AuditLog.workflow_id == workflow.id,
+                    AuditLog.action == "STEP_DISPATCHED",
+                )
+            )
+            if len(list(logs_res.scalars().all())) >= len(wf_def.steps) * 3:
+                target_step_index = None
+
+        status_key = "card.status_rerouted" if target_step_index is not None else "card.status_rejected"
         reject_status_line = (
             self.translator.t(
-                "card.status_rejected",
+                status_key,
                 lang,
                 username=actor_username,
                 timestamp=timestamp_str,
@@ -561,7 +632,7 @@ class WorkflowEngine:
                 lang=lang,
                 include_buttons=False,
                 final_status_line=reject_status_line,
-                color="#DC3545",
+                color="#F59E0B" if target_step_index is not None else "#DC3545",
             )
             await self.mm_client.update_post_card(task.post_id, rejected_card)
 
@@ -603,6 +674,50 @@ class WorkflowEngine:
                 details=f"Rejected at step '{task.step_id}'. Reason: {rejection_reason}",
             )
         )
+
+        # Branch A: Route to alternative approval step
+        if target_step_index is not None:
+            target_step = wf_def.steps[target_step_index]
+            workflow.current_step_index = target_step_index
+            db.add(
+                AuditLog(
+                    workflow_id=workflow.id,
+                    actor_id="system",
+                    action="STEP_REROUTED_ON_REJECT",
+                    details=f"Rerouted from rejected step '{task.step_id}' to alternative step '{target_step.id}'.",
+                )
+            )
+
+            escalation_banner = self.translator.t(
+                "card.escalation_banner",
+                lang,
+                from_step=step_name,
+                username=actor_username,
+                reason=rejection_reason,
+            )
+            await self._dispatch_step(
+                db,
+                workflow,
+                wf_def=wf_def,
+                step_index=target_step_index,
+                initiator_username=initiator_username,
+                escalation_banner=escalation_banner,
+            )
+            await db.commit()
+
+            logger.info(
+                self.translator.t_log(
+                    "task_rerouted",
+                    task_id=task.id,
+                    workflow_id=workflow.id,
+                    actor_id=actor_user_id,
+                    target_step=target_step.id,
+                )
+            )
+            return
+
+        # Branch B: Return to initiator and terminate workflow as REJECTED
+        workflow.status = WorkflowStatus.REJECTED
         db.add(
             AuditLog(
                 workflow_id=workflow.id,
@@ -612,7 +727,6 @@ class WorkflowEngine:
             )
         )
 
-        # Notify the initiator via Direct Message with the rejection reason
         subject = self.translator.t("dm.workflow_rejected_subject", lang)
         body = self.translator.t(
             "dm.workflow_rejected_body",
@@ -632,8 +746,6 @@ class WorkflowEngine:
         )
 
         await db.commit()
-
-        # Remove temporary files from disk after workflow rejection is persisted
         await self._cleanup_workflow_attachments(db, workflow.id)
 
         logger.info(

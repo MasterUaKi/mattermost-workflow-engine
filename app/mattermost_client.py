@@ -1,12 +1,12 @@
 # Author: Oleh Riabtsev
 # File: app/mattermost_client.py
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.0
 
 """
 Asynchronous client for Mattermost REST API v4 built on httpx.
-Handles Bot Token authentication, Direct Message channel creation, file uploads,
-interactive approval cards, post updates, and Interactive Dialogs.
+Handles Bot Token authentication, user search, Direct Message channels, file uploads,
+interactive approval cards (including escalation banners), post updates, and dialogs.
 """
 
 import json
@@ -98,6 +98,42 @@ class MattermostClient:
         except MattermostAPIError:
             return user_id
 
+    async def search_users(self, term: str = "", limit: int = 25) -> list[dict[str, Any]]:
+        """
+        Searches active non-bot Mattermost users for the visual workflow builder UI.
+        Falls back to listing active users when the search term is empty.
+        """
+        bot_id = await self.get_bot_user_id()
+        clean_term = term.strip()
+
+        if clean_term:
+            raw_users = await self._request(
+                "POST",
+                "/users/search",
+                json={"term": clean_term, "limit": limit, "allow_inactive": False},
+            )
+        else:
+            raw_users = await self._request(
+                "GET",
+                "/users",
+                params={"per_page": limit, "active": "true"},
+            )
+
+        results: list[dict[str, Any]] = []
+        for user in raw_users:
+            if user.get("id") == bot_id or user.get("is_bot") or user.get("delete_at", 0) > 0:
+                continue
+            full_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+            results.append(
+                {
+                    "id": user["id"],
+                    "username": user.get("username", ""),
+                    "full_name": full_name or user.get("username", ""),
+                    "email": user.get("email", ""),
+                }
+            )
+        return results
+
     async def get_or_create_direct_channel(self, target_user_id: str) -> str:
         """
         Creates or retrieves an existing Direct Message channel
@@ -144,6 +180,7 @@ class MattermostClient:
         lang: str,
         include_buttons: bool = True,
         final_status_line: str | None = None,
+        escalation_banner: str | None = None,
         color: str = "#1E90FF",
     ) -> dict[str, Any]:
         """Builds a Mattermost Message Attachment payload for an approval card."""
@@ -179,25 +216,41 @@ class MattermostClient:
                 }
             )
 
-        if document_data:
-            formatted_meta = "\n".join(f"- **{k}:** `{v}`" for k, v in document_data.items())
+        # Render custom typed fields or legacy key-value metadata cleanly
+        formatted_lines: list[str] = []
+        custom_fields = document_data.get("_custom_fields") if isinstance(document_data, dict) else None
+        if isinstance(custom_fields, list) and custom_fields:
+            for item in custom_fields:
+                f_name = item.get("name", "")
+                f_val = item.get("value", "")
+                if f_name:
+                    formatted_lines.append(f"- **{f_name}:** `{f_val}`")
+        elif isinstance(document_data, dict):
+            for k, v in document_data.items():
+                if not str(k).startswith("_"):
+                    formatted_lines.append(f"- **{k}:** `{v}`")
+
+        if formatted_lines:
             fields.append(
                 {
                     "title": self.translator.t("card.field_metadata", lang),
-                    "value": formatted_meta,
+                    "value": "\n".join(formatted_lines),
                     "short": False,
                 }
             )
 
+        pretext_key = "card.pretext_escalated" if escalation_banner else "card.pretext_new"
         attachment: dict[str, Any] = {
-            "pretext": self.translator.t("card.pretext_new", lang),
+            "pretext": self.translator.t(pretext_key, lang),
             "title": title,
-            "color": color,
+            "color": "#F59E0B" if (escalation_banner and include_buttons) else color,
             "fields": fields,
         }
 
         if final_status_line:
             attachment["text"] = final_status_line
+        elif escalation_banner:
+            attachment["text"] = escalation_banner
 
         if include_buttons:
             action_url = self._build_callback_url("/api/v1/mattermost/actions")

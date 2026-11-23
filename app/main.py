@@ -1,12 +1,12 @@
 # Author: Oleh Riabtsev
 # File: app/main.py
 # Created: 2026-11-23
-# Version: 1.2.0
+# Version: 1.3.0
 
 """
 FastAPI application entrypoint.
-Initializes the database (when AUTO_CREATE_TABLES=true), Mattermost client,
-localization engine (UI + configurable console logs), workflow engine, and global exception handlers.
+Initializes database, seeds default YAML templates, starts the Mattermost Bot WebSocket
+listener for DM commands ('start' / 'старт'), and mounts all REST and Studio routes.
 """
 
 from collections.abc import AsyncGenerator
@@ -14,12 +14,16 @@ from contextlib import asynccontextmanager
 import logging
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 
 from app.api_routes import router as workflows_router
-from app.config import get_settings, get_workflows_config
-from app.database import init_db
+from app.bot_listener import BotWebSocketListener
+from app.config import WorkflowsConfig, get_settings, get_workflows_config
+from app.database import AsyncSessionLocal, init_db
 from app.i18n import Translator
 from app.mattermost_client import MattermostAPIError, MattermostClient
+from app.models import WorkflowTemplate
+from app.studio_routes import router as studio_router
 from app.webhook_routes import router as mattermost_router
 from app.workflow_engine import WorkflowEngine
 
@@ -30,6 +34,34 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("workflow_engine.main")
+
+
+async def seed_default_templates(workflows_config: WorkflowsConfig) -> None:
+    """Seeds initial templates from workflows.yaml into PostgreSQL if not already present."""
+    try:
+        async with AsyncSessionLocal() as session:
+            for slug, wf_def in workflows_config.workflows.items():
+                existing = (
+                    await session.execute(
+                        select(WorkflowTemplate).where(WorkflowTemplate.slug == slug)
+                    )
+                ).scalar_one_or_none()
+                if not existing:
+                    session.add(
+                        WorkflowTemplate(
+                            slug=slug,
+                            name=wf_def.name,
+                            description=wf_def.description or {},
+                            owner_id="system",
+                            owner_username="system",
+                            default_lang=wf_def.default_lang or workflows_config.default_lang,
+                            steps=[s.model_dump(mode="json") for s in wf_def.steps],
+                            default_fields=[f.model_dump(mode="json") for f in wf_def.default_fields],
+                        )
+                    )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(f"Template seeding skipped: {exc}")
 
 
 @asynccontextmanager
@@ -47,30 +79,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         mm_client=mm_client,
         translator=translator,
     )
+    bot_listener = BotWebSocketListener(
+        settings=settings,
+        mm_client=mm_client,
+        translator=translator,
+    )
 
     app.state.translator = translator
     app.state.mm_client = mm_client
     app.state.workflow_engine = workflow_engine
 
-    # Only run metadata.create_all() when explicitly enabled; production uses Alembic migrations
     if settings.AUTO_CREATE_TABLES:
         await init_db()
+
+    await seed_default_templates(workflows_config)
 
     try:
         bot_id = await mm_client.get_bot_user_id()
         logger.info(translator.t_log("app_startup", bot_id=bot_id))
+        bot_listener.start()
     except Exception as exc:
         logger.warning(translator.t_log("mm_startup_check_failed", detail=str(exc)))
 
     yield
 
+    await bot_listener.stop()
     await mm_client.close()
     logger.info(translator.t_log("app_shutdown"))
 
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="1.2.0",
+    version="1.3.0",
     lifespan=lifespan,
 )
 
@@ -109,3 +149,4 @@ async def health_check() -> dict[str, str]:
 
 app.include_router(workflows_router)
 app.include_router(mattermost_router)
+app.include_router(studio_router)

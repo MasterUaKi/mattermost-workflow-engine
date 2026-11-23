@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: docker-compose.yml
 # Created: 2026-11-23
-# Version: 1.2.0
+# Version: 1.3.0
 
 services:
   db:
@@ -37,7 +37,6 @@ services:
       MM_SQLSETTINGS_DATASOURCE: postgres://${POSTGRES_USER:-workflow_user}:${POSTGRES_PASSWORD:-workflow_pass}@db:5432/${MATTERMOST_DB:-mattermost_db}?sslmode=disable&connect_timeout=10
       MM_SERVICESETTINGS_SITEURL: http://localhost:${MATTERMOST_PORT:-8065}
       MM_SERVICESETTINGS_LISTENADDRESS: :8065
-      # Pre-enable bot creation, access tokens, and internal Docker webhook callbacks
       MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION: "true"
       MM_SERVICESETTINGS_ENABLEUSERACCESSTOKENS: "true"
       MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS: "workflow-engine localhost 127.0.0.1 host.docker.internal"
@@ -65,11 +64,10 @@ services:
     env_file:
       - .env
     environment:
-      # Connect to the PostgreSQL service container via asyncpg
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-workflow_user}:${POSTGRES_PASSWORD:-workflow_pass}@db:5432/${POSTGRES_DB:-workflow_db}
-      # Use values from .env when set (production), or fall back to internal Docker names (local lab)
       MATTERMOST_URL: ${MATTERMOST_URL:-http://mattermost:8065}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://workflow-engine:8000}
+      STUDIO_PUBLIC_URL: ${STUDIO_PUBLIC_URL:-http://localhost:8000}
       WORKFLOWS_CONFIG_PATH: /app/workflows.yaml
       LOCALES_PATH: /app/locales.yaml
       UPLOAD_DIR: /app/uploads

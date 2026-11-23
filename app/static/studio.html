@@ -1,0 +1,1305 @@
+<!--
+Author: Oleh Riabtsev
+File: app/static/studio.html
+Created: 2026-11-23
+Version: 1.0.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Visual Document Approval Studio</title>
+  <style>
+    :root {
+      --bg: #f1f5f9;
+      --surface: #ffffff;
+      --border: #cbd5e1;
+      --text: #0f172a;
+      --muted: #475569;
+      --primary: #2563eb;
+      --primary-soft: #eff6ff;
+      --success: #16a34a;
+      --success-soft: #f0fdf4;
+      --warn: #d97706;
+      --warn-soft: #fffbeb;
+      --danger: #dc2626;
+      --danger-soft: #fef2f2;
+      --radius: 14px;
+      --shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+
+    /* Top Navigation Bar */
+    .topbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .user-pill {
+      background: var(--primary-soft);
+      color: var(--primary);
+      border: 1px solid #bfdbfe;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .lang-switch button {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+    .lang-switch button.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+
+    /* Main 3-Step Visual Layout */
+    .container {
+      max-width: 1380px;
+      margin: 20px auto;
+      padding: 0 20px 60px;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 980px) {
+      .container { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .step-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 17px;
+    }
+
+    /* Template List */
+    .tpl-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .tpl-item {
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      background: #fff;
+    }
+    .tpl-item:hover { border-color: #93c5fd; }
+    .tpl-item.active {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+    }
+    .tpl-title {
+      font-weight: 700;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+    .tpl-meta {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-radius: 10px;
+      border: none;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: transform 0.08s ease, opacity 0.15s ease;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-success { background: var(--success); color: #fff; font-size: 16px; padding: 14px 24px; }
+    .btn-outline { background: #fff; border: 1px solid var(--border); color: var(--text); }
+    .btn-warn { background: var(--warn-soft); border: 1px solid #fcd34d; color: #92400e; }
+    .btn-danger-sm { background: var(--danger-soft); color: var(--danger); padding: 4px 8px; font-size: 12px; border-radius: 6px; }
+    .btn-full { width: 100%; }
+
+    /* Visual Pipeline Canvas */
+    .pipeline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .lock-banner {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .pipeline-track {
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+      overflow-x: auto;
+      padding: 16px 8px 20px;
+      background: radial-gradient(#cbd5e1 1px, transparent 1px);
+      background-size: 18px 18px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      min-height: 280px;
+    }
+
+    .node-terminal {
+      min-width: 130px;
+      border-radius: 14px;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-weight: 700;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .node-start {
+      background: var(--primary-soft);
+      border: 2px solid #93c5fd;
+      color: #1e40af;
+    }
+    .node-end {
+      background: var(--success-soft);
+      border: 2px solid #86efac;
+      color: #166534;
+    }
+    .node-icon { font-size: 28px; margin-bottom: 6px; }
+
+    .arrow-connector {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 22px;
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    /* Stage Card on Canvas */
+    .stage-node {
+      width: 295px;
+      flex-shrink: 0;
+      background: #fff;
+      border: 2px solid #94a3b8;
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+    }
+    .stage-node.alt-stage {
+      border-color: var(--warn);
+      border-style: dashed;
+      background: #fffdf7;
+    }
+    .stage-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .stage-num {
+      background: var(--text);
+      color: #fff;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .stage-node.alt-stage .stage-num { background: var(--warn); }
+    .stage-title-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    /* Approver Chips */
+    .approver-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 28px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #e2e8f0;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .chip button {
+      border: none;
+      background: none;
+      color: var(--danger);
+      font-weight: 700;
+      cursor: pointer;
+      padding: 0 2px;
+    }
+
+    /* User Search Dropdown */
+    .user-picker { position: relative; }
+    .user-picker input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    .dropdown-list {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 105%;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      max-height: 160px;
+      overflow-y: auto;
+      z-index: 30;
+    }
+    .dropdown-item {
+      padding: 7px 10px;
+      font-size: 13px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .dropdown-item:hover { background: var(--primary-soft); }
+
+    /* Mode & Reject Branch Box */
+    .mode-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      background: #f1f5f9;
+      padding: 3px;
+      border-radius: 8px;
+    }
+    .mode-toggle button {
+      border: none;
+      background: transparent;
+      padding: 5px 6px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .mode-toggle button.active {
+      background: #fff;
+      color: var(--primary);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .reject-box {
+      background: var(--danger-soft);
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      padding: 7px 8px;
+      font-size: 12px;
+    }
+    .reject-box label {
+      display: block;
+      font-weight: 700;
+      color: #991b1b;
+      margin-bottom: 4px;
+    }
+    .reject-box select {
+      width: 100%;
+      border: 1px solid #fca5a5;
+      border-radius: 6px;
+      padding: 4px 6px;
+      font-size: 12px;
+      background: #fff;
+    }
+
+    /* Live Human Story Summary */
+    .story-box {
+      margin-top: 14px;
+      background: #f8fafc;
+      border-left: 4px solid var(--primary);
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .validation-box {
+      margin-top: 10px;
+      background: var(--warn-soft);
+      border: 1px solid #fcd34d;
+      color: #92400e;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      display: none;
+    }
+
+    /* Document Form & Dynamic Fields */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 12px;
+    }
+    @media (max-width: 720px) { .form-grid { grid-template-columns: 1fr; } }
+    .field-group { display: flex; flex-direction: column; gap: 5px; }
+    .field-group label { font-size: 13px; font-weight: 700; }
+    .field-group input, .field-group textarea, .field-group select {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-size: 14px;
+    }
+
+    .dropzone {
+      border: 2px dashed #93c5fd;
+      background: var(--primary-soft);
+      border-radius: 12px;
+      padding: 18px;
+      text-align: center;
+      cursor: pointer;
+      font-weight: 600;
+      color: #1e40af;
+    }
+    .file-list {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .custom-field-row {
+      display: grid;
+      grid-template-columns: 2fr 1.2fr 2fr auto;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .custom-field-row input, .custom-field-row select {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 13px;
+    }
+
+    .success-banner {
+      display: none;
+      margin-top: 16px;
+      background: var(--success-soft);
+      border: 2px solid #86efac;
+      color: #166534;
+      padding: 16px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .auth-error {
+      max-width: 560px;
+      margin: 80px auto;
+      background: #fff;
+      border: 2px solid #fca5a5;
+      border-radius: 16px;
+      padding: 28px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span>🚦</span>
+    <span data-i18n="appTitle">Visual Document Approval Studio</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <div id="userBadge" class="user-pill">...</div>
+    <div class="lang-switch">
+      <button type="button" onclick="setUiLang('en')" id="lang-en">EN</button>
+      <button type="button" onclick="setUiLang('de')" id="lang-de">DE</button>
+      <button type="button" onclick="setUiLang('ru')" id="lang-ru">RU</button>
+    </div>
+  </div>
+</div>
+
+<div id="authErrorScreen" class="auth-error" style="display:none;">
+  <h2>🔒 Session Required</h2>
+  <p id="authErrorMsg">Open Mattermost and send <b>start</b> (or <b>старт</b>) to <b>@approval-bot</b> to get your personal link.</p>
+</div>
+
+<div id="mainApp" class="container" style="display:none;">
+  <!-- Step 1: Select or Create Route -->
+  <aside class="card">
+    <div class="step-badge" data-i18n="step1Badge">Step 1 • Route</div>
+    <h2 data-i18n="chooseRouteTitle">Choose Approval Route</h2>
+    <div id="templateList" class="tpl-list"></div>
+    <button type="button" class="btn btn-primary btn-full" onclick="createNewBlankTemplate()">
+      <span>➕</span>
+      <span data-i18n="btnNewRoute">Create New Route</span>
+    </button>
+  </aside>
+
+  <!-- Step 2 & 3: Visual Pipeline + Document Launch -->
+  <main style="display:flex; flex-direction:column; gap:20px;">
+    <section class="card">
+      <div class="pipeline-header">
+        <div>
+          <div class="step-badge" data-i18n="step2Badge">Step 2 • Visual Pipeline</div>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <input id="templateNameInput" type="text" style="font-size:17px; font-weight:700; border:1px solid var(--border); border-radius:8px; padding:6px 10px;" />
+            <span id="ownerLockBadge" class="lock-banner"></span>
+          </div>
+        </div>
+        <div id="builderActions" style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-outline" onclick="addStage(false)">
+            <span>➕</span> <span data-i18n="btnAddStep">Add Stage</span>
+          </button>
+          <button type="button" class="btn btn-warn" onclick="addStage(true)">
+            <span>↪️</span> <span data-i18n="btnAddAltStep">Add Rejection Branch</span>
+          </button>
+          <button type="button" class="btn btn-primary" onclick="saveCurrentTemplate()">
+            <span>💾</span> <span data-i18n="btnSaveRoute">Save Route</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Visual Infographic Track -->
+      <div id="pipelineTrack" class="pipeline-track"></div>
+
+      <!-- Plain-Language Live Explanation -->
+      <div id="storyBox" class="story-box"></div>
+      <div id="validationBox" class="validation-box"></div>
+    </section>
+
+    <!-- Step 3: Document Details, Custom Fields & Files -->
+    <section class="card">
+      <div class="step-badge" data-i18n="step3Badge">Step 3 • Document & Send</div>
+      <h2 data-i18n="docDetailsTitle">Attach Document & Start Approval</h2>
+
+      <div class="form-grid">
+        <div class="field-group">
+          <label data-i18n="labelDocTitle">Document Title *</label>
+          <input id="docTitle" type="text" placeholder="e.g. Cloud Server Contract #2026-481" />
+        </div>
+        <div class="field-group">
+          <label data-i18n="labelNotifyLang">Mattermost Card Language</label>
+          <select id="docLang">
+            <option value="en">English (EN)</option>
+            <option value="de">Deutsch (DE)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-group" style="margin-top:12px;">
+        <label data-i18n="labelDocDesc">Comment for Approvers</label>
+        <textarea id="docDesc" rows="2" placeholder="Optional short note..."></textarea>
+      </div>
+
+      <!-- Dynamic Unlimited Custom Fields -->
+      <div style="margin-top:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <label style="font-size:13px; font-weight:700;" data-i18n="labelCustomFields">Document Fields (Unlimited)</label>
+          <button type="button" class="btn btn-outline" style="padding:5px 10px; font-size:12px;" onclick="addCustomFieldRow()">
+            <span>➕</span> <span data-i18n="btnAddField">Add Field</span>
+          </button>
+        </div>
+        <div id="customFieldsContainer"></div>
+      </div>
+
+      <!-- Drag & Drop File Upload -->
+      <div style="margin-top:16px;">
+        <div class="dropzone" onclick="document.getElementById('fileInput').click()">
+          <span data-i18n="dropzoneText">📎 Click to attach PDF, DOCX, or image files</span>
+          <input id="fileInput" type="file" multiple style="display:none;" onchange="handleFileSelect(event)" />
+        </div>
+        <div id="fileList" class="file-list"></div>
+      </div>
+
+      <div style="margin-top:20px; display:flex; justify-content:flex-end;">
+        <button type="button" class="btn btn-success" onclick="submitWorkflow()">
+          <span>🚀</span> <span data-i18n="btnLaunch">Send for Approval</span>
+        </button>
+      </div>
+
+      <div id="successBanner" class="success-banner"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+  const I18N = {
+    en: {
+      appTitle: "Visual Document Approval Studio",
+      step1Badge: "Step 1 • Route",
+      chooseRouteTitle: "Choose Approval Route",
+      btnNewRoute: "Create New Route",
+      step2Badge: "Step 2 • Visual Pipeline",
+      btnAddStep: "Add Stage",
+      btnAddAltStep: "Add Rejection Branch",
+      btnSaveRoute: "Save Route",
+      step3Badge: "Step 3 • Document & Send",
+      docDetailsTitle: "Attach Document & Start Approval",
+      labelDocTitle: "Document Title *",
+      labelNotifyLang: "Mattermost Card Language",
+      labelDocDesc: "Comment for Approvers",
+      labelCustomFields: "Document Fields (Unlimited)",
+      btnAddField: "Add Field",
+      dropzoneText: "📎 Click to attach PDF, DOCX, or image files",
+      btnLaunch: "Send for Approval",
+      nodeDoc: "Document",
+      nodeDone: "Approved!",
+      modeSeq: "➡️ One by one",
+      modePar: "🔀 All at once",
+      rejectLabel: "If rejected:",
+      rejectStop: "🛑 Return to author (Stop)",
+      rejectGoto: "↪️ Reroute to: ",
+      searchUserPlaceholder: "+ Type name to add approver...",
+      ownerEditable: "✏️ You created this route (editable)",
+      ownerLocked: "🔒 Created by @{owner} (view only)",
+      altBadge: "Alternative Branch",
+      errNoTitle: "Please enter a Document Title before sending.",
+      errEmptyStage: "Stage #{num} has no approvers selected.",
+      errSaveFirst: "Please save your new route first before launching.",
+      savedOk: "✅ Route saved! Only you can edit its stages.",
+      launchedOk: "✅ Sent! Workflow ID: {id}. Approvers have received cards in Mattermost."
+    },
+    de: {
+      appTitle: "Visuelles Genehmigungs-Studio",
+      step1Badge: "Schritt 1 • Route",
+      chooseRouteTitle: "Genehmigungsroute wählen",
+      btnNewRoute: "Neue Route erstellen",
+      step2Badge: "Schritt 2 • Visueller Ablauf",
+      btnAddStep: "Stufe hinzufügen",
+      btnAddAltStep: "Ablehnungszweig hinzufügen",
+      btnSaveRoute: "Route speichern",
+      step3Badge: "Schritt 3 • Dokument & Start",
+      docDetailsTitle: "Dokument anhängen & starten",
+      labelDocTitle: "Dokumenttitel *",
+      labelNotifyLang: "Sprache der Mattermost-Karte",
+      labelDocDesc: "Kommentar für Prüfer",
+      labelCustomFields: "Dokumentfelder (Unbegrenzt)",
+      btnAddField: "Feld hinzufügen",
+      dropzoneText: "📎 Klicken, um PDF-, DOCX- oder Bilddateien anzuhängen",
+      btnLaunch: "Zur Genehmigung senden",
+      nodeDoc: "Dokument",
+      nodeDone: "Genehmigt!",
+      modeSeq: "➡️ Nacheinander",
+      modePar: "🔀 Alle gleichzeitig",
+      rejectLabel: "Bei Ablehnung:",
+      rejectStop: "🛑 Zurück an Antragsteller (Stopp)",
+      rejectGoto: "↪️ Weiterleiten an: ",
+      searchUserPlaceholder: "+ Name eingeben, um Prüfer hinzuzufügen...",
+      ownerEditable: "✏️ Von Ihnen erstellt (bearbeitbar)",
+      ownerLocked: "🔒 Erstellt von @{owner} (nur Ansicht)",
+      altBadge: "Alternativzweig",
+      errNoTitle: "Bitte geben Sie einen Dokumenttitel ein.",
+      errEmptyStage: "Stufe #{num} hat noch keine Prüfer.",
+      errSaveFirst: "Bitte speichern Sie die neue Route zuerst.",
+      savedOk: "✅ Route gespeichert! Nur Sie können die Schritte bearbeiten.",
+      launchedOk: "✅ Gesendet! Vorgangs-ID: {id}. Prüfer wurden in Mattermost benachrichtigt."
+    },
+    ru: {
+      appTitle: "Визуальный конструктор согласования",
+      step1Badge: "Шаг 1 • Маршрут",
+      chooseRouteTitle: "Выберите маршрут",
+      btnNewRoute: "Создать новый маршрут",
+      step2Badge: "Шаг 2 • Визуальный конвейер",
+      btnAddStep: "Добавить этап",
+      btnAddAltStep: "Альтернативный этап при отказе",
+      btnSaveRoute: "Сохранить маршрут",
+      step3Badge: "Шаг 3 • Документ и запуск",
+      docDetailsTitle: "Прикрепите документ и отправьте",
+      labelDocTitle: "Название документа *",
+      labelNotifyLang: "Язык карточки в Mattermost",
+      labelDocDesc: "Комментарий для согласующих",
+      labelCustomFields: "Поля документа (неограниченно)",
+      btnAddField: "Добавить поле",
+      dropzoneText: "📎 Нажмите, чтобы прикрепить PDF, DOCX или изображения",
+      btnLaunch: "Отправить на согласование",
+      nodeDoc: "Документ",
+      nodeDone: "Согласовано!",
+      modeSeq: "➡️ По очереди",
+      modePar: "🔀 Всем сразу",
+      rejectLabel: "Если откажут:",
+      rejectStop: "🛑 Вернуть автору (Стоп)",
+      rejectGoto: "↪️ Передать на: ",
+      searchUserPlaceholder: "+ Введите имя коллеги...",
+      ownerEditable: "✏️ Вы автор маршрута (можно менять)",
+      ownerLocked: "🔒 Автор: @{owner} (только просмотр)",
+      altBadge: "Ветка при отказе",
+      errNoTitle: "Пожалуйста, введите название документа.",
+      errEmptyStage: "На этапе №{num} не выбран ни один согласующий.",
+      errSaveFirst: "Сначала нажмите «Сохранить маршрут».",
+      savedOk: "✅ Маршрут сохранён! Редактировать его можете только вы.",
+      launchedOk: "✅ Отправлено! ID процесса: {id}. Карточки уже в Mattermost."
+    }
+  };
+
+  let uiLang = "en";
+  let sessionToken = "";
+  let currentUser = null;
+  let allUsers = [];
+  let templates = [];
+  let activeTemplate = null;
+  let isDirtyUnsaved = false;
+  let customFields = [];
+  let attachedFiles = [];
+
+  function t(key, vars = {}) {
+    let str = (I18N[uiLang] && I18N[uiLang][key]) || I18N.en[key] || key;
+    for (const [k, v] of Object.entries(vars)) {
+      str = str.replace(`{${k}}`, v);
+    }
+    return str;
+  }
+
+  function setUiLang(lang) {
+    uiLang = lang;
+    document.querySelectorAll(".lang-switch button").forEach(b => b.classList.remove("active"));
+    document.getElementById(`lang-${lang}`).classList.add("active");
+    document.querySelectorAll("[data-i18n]").forEach(el => {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    renderTemplateList();
+    renderPipeline();
+  }
+
+  async function apiFetch(url, options = {}) {
+    const headers = options.headers || {};
+    headers["X-Studio-Token"] = sessionToken;
+    const resp = await fetch(url, { ...options, headers });
+    if (!resp.ok) {
+      let detail = `HTTP ${resp.status}`;
+      try {
+        const err = await resp.json();
+        detail = err.detail || detail;
+      } catch {}
+      throw new Error(detail);
+    }
+    if (resp.status === 204) return null;
+    return resp.json();
+  }
+
+  async function init() {
+    const params = new URLSearchParams(window.location.search);
+    sessionToken = params.get("token") || localStorage.getItem("mm_studio_token") || "";
+    if (!sessionToken) {
+      document.getElementById("authErrorScreen").style.display = "block";
+      return;
+    }
+    localStorage.setItem("mm_studio_token", sessionToken);
+
+    try {
+      currentUser = await apiFetch("/api/v1/studio/session");
+      document.getElementById("userBadge").textContent = `👤 @${currentUser.username}`;
+      allUsers = await apiFetch("/api/v1/mattermost/users");
+      templates = await apiFetch("/api/v1/templates");
+      document.getElementById("mainApp").style.display = "grid";
+
+      if (templates.length > 0) {
+        selectTemplate(templates[0].id);
+      } else {
+        createNewBlankTemplate();
+      }
+      setUiLang("en");
+    } catch (err) {
+      document.getElementById("authErrorMsg").textContent = err.message;
+      document.getElementById("authErrorScreen").style.display = "block";
+    }
+  }
+
+  function getUserLabel(userId) {
+    const found = allUsers.find(u => u.id === userId);
+    return found ? `${found.full_name} (@${found.username})` : userId;
+  }
+
+  function renderTemplateList() {
+    const listEl = document.getElementById("templateList");
+    listEl.innerHTML = "";
+    templates.forEach(tpl => {
+      const div = document.createElement("div");
+      div.className = "tpl-item" + (activeTemplate && activeTemplate.id === tpl.id ? " active" : "");
+      const title = tpl.name[uiLang] || tpl.name.en || tpl.name.de || tpl.slug;
+      const lockIcon = tpl.can_edit ? "✏️" : "🔒";
+      div.innerHTML = `
+        <div class="tpl-title">${lockIcon} ${escapeHtml(title)}</div>
+        <div class="tpl-meta">
+          <span>@${escapeHtml(tpl.owner_username)}</span>
+          <span>${tpl.steps.length} stages</span>
+        </div>
+      `;
+      div.onclick = () => selectTemplate(tpl.id);
+      listEl.appendChild(div);
+    });
+  }
+
+  function selectTemplate(tplId) {
+    const found = templates.find(item => item.id === tplId);
+    if (!found) return;
+    activeTemplate = JSON.parse(JSON.stringify(found));
+    isDirtyUnsaved = false;
+
+    const title = activeTemplate.name[uiLang] || activeTemplate.name.en || activeTemplate.name.de || "";
+    document.getElementById("templateNameInput").value = title;
+    document.getElementById("templateNameInput").disabled = !activeTemplate.can_edit;
+    document.getElementById("docLang").value = activeTemplate.default_lang || "en";
+
+    const lockBadge = document.getElementById("ownerLockBadge");
+    lockBadge.textContent = activeTemplate.can_edit
+      ? t("ownerEditable")
+      : t("ownerLocked", { owner: activeTemplate.owner_username });
+
+    document.getElementById("builderActions").style.display = activeTemplate.can_edit ? "flex" : "none";
+
+    // Load template predefined fields
+    customFields = (activeTemplate.default_fields || []).map(f => ({
+      name: f.name,
+      type: f.type || "text",
+      value: f.default_value || ""
+    }));
+    renderCustomFields();
+    renderTemplateList();
+    renderPipeline();
+  }
+
+  function createNewBlankTemplate() {
+    activeTemplate = {
+      id: null,
+      slug: null,
+      name: { en: "New Approval Route", de: "Neue Genehmigungsroute" },
+      description: {},
+      owner_id: currentUser.user_id,
+      owner_username: currentUser.username,
+      can_edit: true,
+      default_lang: "en",
+      steps: [
+        {
+          id: `step_${Date.now()}`,
+          name: { en: "Stage 1", de: "Stufe 1" },
+          type: "sequential",
+          approvers: [],
+          is_alternative: false,
+          on_reject: "return_to_initiator",
+          on_reject_step_id: null
+        }
+      ],
+      default_fields: []
+    };
+    isDirtyUnsaved = true;
+    document.getElementById("templateNameInput").value = activeTemplate.name[uiLang] || activeTemplate.name.en;
+    document.getElementById("templateNameInput").disabled = false;
+    document.getElementById("ownerLockBadge").textContent = t("ownerEditable");
+    document.getElementById("builderActions").style.display = "flex";
+    customFields = [];
+    renderCustomFields();
+    renderTemplateList();
+    renderPipeline();
+  }
+
+  function addStage(isAlternative) {
+    if (!activeTemplate || !activeTemplate.can_edit) return;
+    const idx = activeTemplate.steps.length + 1;
+    const newStepId = `step_${idx}_${Math.random().toString(36).slice(2, 6)}`;
+    activeTemplate.steps.push({
+      id: newStepId,
+      name: {
+        en: isAlternative ? `Alternative Stage ${idx}` : `Stage ${idx}`,
+        de: isAlternative ? `Alternativstufe ${idx}` : `Stufe ${idx}`
+      },
+      type: "sequential",
+      approvers: [],
+      is_alternative: isAlternative,
+      on_reject: "return_to_initiator",
+      on_reject_step_id: null
+    });
+    isDirtyUnsaved = true;
+    renderPipeline();
+  }
+
+  function removeStage(index) {
+    if (!activeTemplate || !activeTemplate.can_edit || activeTemplate.steps.length <= 1) return;
+    const removedId = activeTemplate.steps[index].id;
+    activeTemplate.steps.splice(index, 1);
+    // Reset any rejection branches pointing to the deleted step
+    activeTemplate.steps.forEach(s => {
+      if (s.on_reject_step_id === removedId) {
+        s.on_reject = "return_to_initiator";
+        s.on_reject_step_id = null;
+      }
+    });
+    isDirtyUnsaved = true;
+    renderPipeline();
+  }
+
+  function renderPipeline() {
+    if (!activeTemplate) return;
+    const track = document.getElementById("pipelineTrack");
+    track.innerHTML = "";
+
+    // Start Node
+    const startNode = document.createElement("div");
+    startNode.className = "node-terminal node-start";
+    startNode.innerHTML = `<div class="node-icon">📄</div><div>${t("nodeDoc")}</div>`;
+    track.appendChild(startNode);
+
+    activeTemplate.steps.forEach((step, idx) => {
+      const arrow = document.createElement("div");
+      arrow.className = "arrow-connector";
+      arrow.innerHTML = step.is_alternative ? "⤵️" : "➔";
+      track.appendChild(arrow);
+
+      const card = document.createElement("div");
+      card.className = "stage-node" + (step.is_alternative ? " alt-stage" : "");
+      const stepTitle = step.name[uiLang] || step.name.en || step.name.de || `Stage ${idx + 1}`;
+      const canEdit = activeTemplate.can_edit;
+
+      // Top row: number + editable title + delete button
+      const topRow = document.createElement("div");
+      topRow.className = "stage-top";
+      topRow.innerHTML = `
+        <span class="stage-num">${idx + 1}</span>
+        <input class="stage-title-input" type="text" value="${escapeHtml(stepTitle)}" ${canEdit ? "" : "disabled"} />
+        ${canEdit && activeTemplate.steps.length > 1 ? `<button type="button" class="btn-danger-sm" title="Remove">✕</button>` : ""}
+      `;
+      topRow.querySelector("input").oninput = (e) => {
+        step.name.en = e.target.value;
+        step.name.de = e.target.value;
+        isDirtyUnsaved = true;
+        updateLiveStory();
+      };
+      const delBtn = topRow.querySelector("button");
+      if (delBtn) delBtn.onclick = () => removeStage(idx);
+      card.appendChild(topRow);
+
+      if (step.is_alternative) {
+        const altTag = document.createElement("div");
+        altTag.style.cssText = "font-size:11px; font-weight:700; color:#b45309;";
+        altTag.textContent = `⚡ ${t("altBadge")}`;
+        card.appendChild(altTag);
+      }
+
+      // Selected approvers chips
+      const chipsDiv = document.createElement("div");
+      chipsDiv.className = "approver-chips";
+      step.approvers.forEach(uid => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.innerHTML = `<span>${escapeHtml(getUserLabel(uid))}</span>` +
+          (canEdit ? `<button type="button">×</button>` : "");
+        if (canEdit) {
+          chip.querySelector("button").onclick = () => {
+            step.approvers = step.approvers.filter(id => id !== uid);
+            isDirtyUnsaved = true;
+            renderPipeline();
+          };
+        }
+        chipsDiv.appendChild(chip);
+      });
+      card.appendChild(chipsDiv);
+
+      // Live user picker (only when editable)
+      if (canEdit) {
+        const picker = document.createElement("div");
+        picker.className = "user-picker";
+        const searchInput = document.createElement("input");
+        searchInput.type = "text";
+        searchInput.placeholder = t("searchUserPlaceholder");
+        const dropdown = document.createElement("div");
+        dropdown.className = "dropdown-list";
+        dropdown.style.display = "none";
+
+        const populateDropdown = (query) => {
+          const q = query.toLowerCase();
+          const available = allUsers.filter(u =>
+            !step.approvers.includes(u.id) &&
+            (u.username.toLowerCase().includes(q) || u.full_name.toLowerCase().includes(q))
+          );
+          dropdown.innerHTML = "";
+          if (available.length === 0) {
+            dropdown.style.display = "none";
+            return;
+          }
+          available.slice(0, 8).forEach(u => {
+            const item = document.createElement("div");
+            item.className = "dropdown-item";
+            item.textContent = `${u.full_name} (@${u.username})`;
+            item.onmousedown = () => {
+              step.approvers.push(u.id);
+              isDirtyUnsaved = true;
+              renderPipeline();
+            };
+            dropdown.appendChild(item);
+          });
+          dropdown.style.display = "block";
+        };
+
+        searchInput.onfocus = () => populateDropdown(searchInput.value);
+        searchInput.oninput = () => populateDropdown(searchInput.value);
+        searchInput.onblur = () => setTimeout(() => { dropdown.style.display = "none"; }, 150);
+
+        picker.appendChild(searchInput);
+        picker.appendChild(dropdown);
+        card.appendChild(picker);
+      }
+
+      // Sequential vs Parallel toggle (shown when 2+ approvers are selected)
+      if (step.approvers.length >= 2) {
+        const toggle = document.createElement("div");
+        toggle.className = "mode-toggle";
+        toggle.innerHTML = `
+          <button type="button" class="${step.type === "sequential" ? "active" : ""}" ${canEdit ? "" : "disabled"}>${t("modeSeq")}</button>
+          <button type="button" class="${step.type === "parallel" ? "active" : ""}" ${canEdit ? "" : "disabled"}>${t("modePar")}</button>
+        `;
+        if (canEdit) {
+          const [seqBtn, parBtn] = toggle.querySelectorAll("button");
+          seqBtn.onclick = () => { step.type = "sequential"; isDirtyUnsaved = true; renderPipeline(); };
+          parBtn.onclick = () => { step.type = "parallel"; isDirtyUnsaved = true; renderPipeline(); };
+        }
+        card.appendChild(toggle);
+      }
+
+      // Rejection routing selector (Return to initiator vs Reroute to alternative stage)
+      const rejectBox = document.createElement("div");
+      rejectBox.className = "reject-box";
+      const otherSteps = activeTemplate.steps
+        .map((s, sIdx) => ({ s, sIdx }))
+        .filter(item => item.s.id !== step.id);
+
+      let optionsHtml = `<option value="return_to_initiator" ${step.on_reject !== "goto_step" ? "selected" : ""}>${t("rejectStop")}</option>`;
+      otherSteps.forEach(({ s, sIdx }) => {
+        const targetTitle = s.name[uiLang] || s.name.en || `Stage ${sIdx + 1}`;
+        const selected = step.on_reject === "goto_step" && step.on_reject_step_id === s.id ? "selected" : "";
+        optionsHtml += `<option value="${s.id}" ${selected}>${t("rejectGoto")}#${sIdx + 1} ${escapeHtml(targetTitle)}</option>`;
+      });
+
+      rejectBox.innerHTML = `
+        <label>${t("rejectLabel")}</label>
+        <select ${canEdit ? "" : "disabled"}>${optionsHtml}</select>
+      `;
+      if (canEdit) {
+        rejectBox.querySelector("select").onchange = (e) => {
+          if (e.target.value === "return_to_initiator") {
+            step.on_reject = "return_to_initiator";
+            step.on_reject_step_id = null;
+          } else {
+            step.on_reject = "goto_step";
+            step.on_reject_step_id = e.target.value;
+          }
+          isDirtyUnsaved = true;
+          updateLiveStory();
+        };
+      }
+      card.appendChild(rejectBox);
+      track.appendChild(card);
+    });
+
+    // End Node
+    const endArrow = document.createElement("div");
+    endArrow.className = "arrow-connector";
+    endArrow.innerHTML = "➔";
+    track.appendChild(endArrow);
+
+    const endNode = document.createElement("div");
+    endNode.className = "node-terminal node-end";
+    endNode.innerHTML = `<div class="node-icon">🏁</div><div>${t("nodeDone")}</div>`;
+    track.appendChild(endNode);
+
+    updateLiveStory();
+  }
+
+  function updateLiveStory() {
+    if (!activeTemplate) return;
+    const parts = activeTemplate.steps.map((s, idx) => {
+      const title = s.name[uiLang] || s.name.en || `Stage ${idx + 1}`;
+      const names = s.approvers.length
+        ? s.approvers.map(getUserLabel).join(s.type === "parallel" ? " + " : " ➔ ")
+        : "❓";
+      let branchNote = "";
+      if (s.on_reject === "goto_step" && s.on_reject_step_id) {
+        const targetIdx = activeTemplate.steps.findIndex(x => x.id === s.on_reject_step_id);
+        if (targetIdx >= 0) {
+          const targetTitle = activeTemplate.steps[targetIdx].name[uiLang] || activeTemplate.steps[targetIdx].name.en;
+          branchNote = ` (↪️ reject ➔ #${targetIdx + 1} ${targetTitle})`;
+        }
+      }
+      return `<b>#${idx + 1} ${escapeHtml(title)}</b> [${escapeHtml(names)}]${escapeHtml(branchNote)}`;
+    });
+
+    document.getElementById("storyBox").innerHTML = `📄 ➔ ${parts.join(" ➔ ")} ➔ 🏁`;
+  }
+
+  function showWarning(msg) {
+    const box = document.getElementById("validationBox");
+    if (!msg) {
+      box.style.display = "none";
+      return;
+    }
+    box.textContent = `⚠️ ${msg}`;
+    box.style.display = "block";
+  }
+
+  async function saveCurrentTemplate() {
+    if (!activeTemplate || !activeTemplate.can_edit) return;
+    for (let i = 0; i < activeTemplate.steps.length; i++) {
+      if (activeTemplate.steps[i].approvers.length === 0) {
+        showWarning(t("errEmptyStage", { num: i + 1 }));
+        return;
+      }
+    }
+    showWarning("");
+
+    const routeName = document.getElementById("templateNameInput").value.trim() || "Approval Route";
+    const payload = {
+      name: { en: routeName, de: routeName },
+      description: activeTemplate.description || {},
+      default_lang: document.getElementById("docLang").value,
+      steps: activeTemplate.steps,
+      default_fields: customFields.map(f => ({
+        name: f.name,
+        type: f.type,
+        default_value: f.value,
+        required: false
+      }))
+    };
+
+    try {
+      let saved;
+      if (activeTemplate.id) {
+        saved = await apiFetch(`/api/v1/templates/${activeTemplate.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } else {
+        saved = await apiFetch("/api/v1/templates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      }
+      templates = await apiFetch("/api/v1/templates");
+      selectTemplate(saved.id);
+      const banner = document.getElementById("successBanner");
+      banner.textContent = t("savedOk");
+      banner.style.display = "block";
+    } catch (err) {
+      showWarning(err.message);
+    }
+  }
+
+  function addCustomFieldRow() {
+    customFields.push({ name: "", type: "text", value: "" });
+    renderCustomFields();
+  }
+
+  function renderCustomFields() {
+    const container = document.getElementById("customFieldsContainer");
+    container.innerHTML = "";
+    customFields.forEach((field, idx) => {
+      const row = document.createElement("div");
+      row.className = "custom-field-row";
+
+      let valueInputHtml = `<input type="text" value="${escapeHtml(field.value)}" placeholder="Value" />`;
+      if (field.type === "number") {
+        valueInputHtml = `<input type="number" step="any" value="${escapeHtml(field.value)}" placeholder="0.00" />`;
+      } else if (field.type === "date") {
+        valueInputHtml = `<input type="date" value="${escapeHtml(field.value)}" />`;
+      } else if (field.type === "url") {
+        valueInputHtml = `<input type="url" value="${escapeHtml(field.value)}" placeholder="https://..." />`;
+      } else if (field.type === "boolean") {
+        valueInputHtml = `
+          <select>
+            <option value="Yes" ${field.value === "Yes" ? "selected" : ""}>Yes</option>
+            <option value="No" ${field.value !== "Yes" ? "selected" : ""}>No</option>
+          </select>
+        `;
+      }
+
+      row.innerHTML = `
+        <input type="text" value="${escapeHtml(field.name)}" placeholder="Field Name (e.g. Amount)" />
+        <select>
+          <option value="text" ${field.type === "text" ? "selected" : ""}>Text</option>
+          <option value="number" ${field.type === "number" ? "selected" : ""}>Number</option>
+          <option value="date" ${field.type === "date" ? "selected" : ""}>Date</option>
+          <option value="boolean" ${field.type === "boolean" ? "selected" : ""}>Yes / No</option>
+          <option value="url" ${field.type === "url" ? "selected" : ""}>Link (URL)</option>
+        </select>
+        ${valueInputHtml}
+        <button type="button" class="btn-danger-sm">✕</button>
+      `;
+
+      const inputs = row.querySelectorAll("input, select");
+      inputs[0].oninput = (e) => { field.name = e.target.value; };
+      inputs[1].onchange = (e) => {
+        field.type = e.target.value;
+        field.value = field.type === "boolean" ? "Yes" : "";
+        renderCustomFields();
+      };
+      inputs[2].oninput = (e) => { field.value = e.target.value; };
+      inputs[2].onchange = (e) => { field.value = e.target.value; };
+      row.querySelector("button").onclick = () => {
+        customFields.splice(idx, 1);
+        renderCustomFields();
+      };
+
+      container.appendChild(row);
+    });
+  }
+
+  function handleFileSelect(event) {
+    attachedFiles = Array.from(event.target.files || []);
+    const listEl = document.getElementById("fileList");
+    listEl.innerHTML = "";
+    attachedFiles.forEach(file => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = `📄 ${file.name} (${Math.round(file.size / 1024)} KB)`;
+      listEl.appendChild(chip);
+    });
+  }
+
+  async function submitWorkflow() {
+    if (!activeTemplate) return;
+    if (!activeTemplate.slug || isDirtyUnsaved) {
+      if (activeTemplate.can_edit) {
+        await saveCurrentTemplate();
+        if (!activeTemplate.slug) return;
+      } else {
+        showWarning(t("errSaveFirst"));
+        return;
+      }
+    }
+
+    const docTitle = document.getElementById("docTitle").value.trim();
+    if (!docTitle) {
+      showWarning(t("errNoTitle"));
+      return;
+    }
+    showWarning("");
+
+    const validFields = customFields
+      .filter(f => f.name.trim().length > 0)
+      .map(f => ({ name: f.name.trim(), type: f.type, value: String(f.value ?? "") }));
+
+    const formData = new FormData();
+    formData.append("workflow_type", activeTemplate.slug);
+    formData.append("title", docTitle);
+    formData.append("description", document.getElementById("docDesc").value.trim());
+    formData.append("initiator_id", currentUser.user_id);
+    formData.append("lang", document.getElementById("docLang").value);
+    formData.append("document_data", JSON.stringify({ _custom_fields: validFields }));
+
+    attachedFiles.forEach(file => formData.append("files", file, file.name));
+
+    try {
+      const resp = await fetch("/api/v1/workflows/start", {
+        method: "POST",
+        body: formData
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || "Failed to start workflow");
+
+      const banner = document.getElementById("successBanner");
+      banner.textContent = t("launchedOk", { id: data.workflow_id });
+      banner.style.display = "block";
+      document.getElementById("docTitle").value = "";
+      document.getElementById("docDesc").value = "";
+      attachedFiles = [];
+      document.getElementById("fileList").innerHTML = "";
+    } catch (err) {
+      showWarning(err.message);
+    }
+  }
+
+  function escapeHtml(text) {
+    return String(text ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  init();
+</script>
+</body>
+</html>

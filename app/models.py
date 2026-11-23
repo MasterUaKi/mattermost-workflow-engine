@@ -1,11 +1,11 @@
 # Author: Oleh Riabtsev
 # File: app/models.py
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.0
 
 """
-SQLAlchemy 2.0 ORM models for persisting workflow instances, individual approver tasks,
-document attachments, and immutable audit logs.
+SQLAlchemy 2.0 ORM models for persisting workflow templates (with creator ownership),
+workflow instances, individual approver tasks, document attachments, and audit logs.
 """
 
 from datetime import datetime, timezone
@@ -37,12 +37,34 @@ class TaskStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class WorkflowTemplate(Base):
+    """
+    Persisted visual workflow template definition.
+    Only the template creator (owner_id) is authorized to modify or delete its stages.
+    """
+    __tablename__ = "workflow_templates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    name: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    description: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    owner_username: Mapped[str] = mapped_column(String(128), nullable=False, default="system")
+    default_lang: Mapped[str] = mapped_column(String(5), nullable=False, default="en")
+    steps: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    default_fields: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
 class WorkflowInstance(Base):
     """Represents a running or completed document approval workflow instance."""
     __tablename__ = "workflow_instances"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    workflow_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    workflow_type: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     document_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
@@ -57,7 +79,6 @@ class WorkflowInstance(Base):
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
     )
 
-    # Relationships to child tables
     tasks: Mapped[list["ApprovalTask"]] = relationship(
         back_populates="workflow",
         cascade="all, delete-orphan",
@@ -83,7 +104,6 @@ class ApprovalTask(Base):
     step_id: Mapped[str] = mapped_column(String(100), nullable=False)
     approver_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
-    # Mattermost DM channel and post IDs used for updating interactive cards
     dm_channel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     post_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
