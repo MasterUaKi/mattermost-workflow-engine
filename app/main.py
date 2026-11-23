@@ -1,12 +1,12 @@
 # Author: Oleh Riabtsev
 # File: app/main.py
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.0
 
 """
 FastAPI application entrypoint.
-Initializes the database, Mattermost client, localization engine (UI + configurable console logs),
-workflow engine, and global exception handlers.
+Initializes the database (when AUTO_CREATE_TABLES=true), Mattermost client,
+localization engine (UI + configurable console logs), workflow engine, and global exception handlers.
 """
 
 from collections.abc import AsyncGenerator
@@ -52,7 +52,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.mm_client = mm_client
     app.state.workflow_engine = workflow_engine
 
-    await init_db()
+    # Only run metadata.create_all() when explicitly enabled; production uses Alembic migrations
+    if settings.AUTO_CREATE_TABLES:
+        await init_db()
 
     try:
         bot_id = await mm_client.get_bot_user_id()
@@ -68,7 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 

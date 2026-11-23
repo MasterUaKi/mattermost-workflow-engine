@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: Dockerfile
 # Created: 2026-11-23
-# Version: 1.0.0
+# Version: 1.1.0
 
 FROM python:3.11-slim
 
@@ -26,8 +26,10 @@ RUN groupadd --gid 1000 appuser \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code and configuration templates
+# Copy application source code, Alembic migrations, and configuration templates
 COPY app/ ./app/
+COPY alembic/ ./alembic/
+COPY alembic.ini .
 COPY workflows.yaml .
 COPY locales.yaml .
 
@@ -42,4 +44,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Apply pending Alembic database migrations before starting Uvicorn
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

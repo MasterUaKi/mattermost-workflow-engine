@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: app/config.py
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.0
 
 """
 Application configuration module.
@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     MATTERMOST_WEBHOOK_SECRET: str | None = None
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./workflow_engine.db"
+    AUTO_CREATE_TABLES: bool = False
     WORKFLOWS_CONFIG_PATH: str = "workflows.yaml"
     LOCALES_PATH: str = "locales.yaml"
     UPLOAD_DIR: str = "uploads"
