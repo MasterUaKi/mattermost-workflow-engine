@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: Dockerfile
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.0
 
 FROM python:3.11-slim
 
@@ -26,10 +26,12 @@ RUN groupadd --gid 1000 appuser \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code, Alembic migrations, and configuration templates
+# Copy application source code, Alembic migrations, tests, and configuration templates
 COPY app/ ./app/
 COPY alembic/ ./alembic/
+COPY tests/ ./tests/
 COPY alembic.ini .
+COPY pytest.ini .
 COPY workflows.yaml .
 COPY locales.yaml .
 
