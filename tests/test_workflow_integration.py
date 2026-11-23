@@ -1,20 +1,23 @@
 # Author: Oleh Riabtsev
 # File: tests/test_workflow_integration.py
 # Created: 2026-11-23
-# Version: 1.0.0
+# Version: 1.1.0
 
 """
 End-to-end integration tests for the Mattermost Document Approval Workflow Engine.
 Covers:
-1. Single-step sequential approval with file attachment and Mattermost card updates.
+1. Single-step sequential approval with file attachment, card updates, and disk cleanup.
 2. Multi-approver ordered sequential stage progression.
-3. Multi-step workflow combining sequential and parallel synchronization barriers.
-4. Rejection workflow with Interactive Dialog validation, sibling task cancellation, and DM notification.
+3. Multi-step workflow combining sequential and parallel synchronization barriers,
+   ensuring attachments remain available across all stages until final completion.
+4. Rejection workflow with Interactive Dialog validation, sibling task cancellation,
+   initiator DM notification, and temporary file cleanup.
 5. Security token verification, approver authorization checks, and button idempotency.
-6. REST API payload validation and 404 error handling.
+6. REST API payload validation, 404 error handling, and orphaned file cleanup on failure.
 """
 
 import json
+from pathlib import Path
 import httpx
 from tests.conftest import FakeMattermostServer
 
@@ -49,8 +52,14 @@ def _build_button_payload(
 async def test_single_step_sequential_approval_with_attachment(
     api_client: httpx.AsyncClient,
     fake_mm_server: FakeMattermostServer,
+    tmp_path: Path,
 ) -> None:
-    """Verifies starting a workflow with a file attachment, approving it, and notifying the initiator."""
+    """
+    Verifies starting a workflow with a file attachment, approving it,
+    notifying the initiator, and removing the temporary file from uploads.
+    """
+    upload_dir = tmp_path / "uploads"
+
     # 1. Start single-step workflow with a PDF attachment
     start_resp = await api_client.post(
         "/api/v1/workflows/start",
@@ -69,6 +78,11 @@ async def test_single_step_sequential_approval_with_attachment(
     workflow_id = start_data["workflow_id"]
     assert start_data["status"] == "IN_PROGRESS"
     assert start_data["current_step_index"] == 0
+
+    # Verify temporary file exists on disk while workflow is active
+    staged_files = list(upload_dir.glob("*receipt.pdf"))
+    assert len(staged_files) == 1
+    assert staged_files[0].is_file()
 
     # Verify file upload and initial interactive card dispatch to user_mgr_1
     assert len(fake_mm_server.uploaded_files) == 1
@@ -98,6 +112,9 @@ async def test_single_step_sequential_approval_with_attachment(
     assert action_resp.status_code == 200
     assert action_resp.json() == {}
 
+    # Verify temporary attachment file was physically removed from uploads after approval
+    assert list(upload_dir.iterdir()) == []
+
     # Verify original card was updated to remove buttons and display approval status
     assert len(fake_mm_server.updated_posts) == 1
     updated_attachment = fake_mm_server.updated_posts[0]["props"]["attachments"][0]
@@ -111,7 +128,7 @@ async def test_single_step_sequential_approval_with_attachment(
     assert completion_dm["channel_id"] == "dm_user_initiator"
     assert "Completed" in completion_dm["props"]["attachments"][0]["title"]
 
-    # 3. Verify final workflow state and audit trail via REST API
+    # 3. Verify final workflow state and preserved attachment metadata via REST API
     status_resp = await api_client.get(f"/api/v1/workflows/{workflow_id}")
     assert status_resp.status_code == 200
     details = status_resp.json()
@@ -119,6 +136,7 @@ async def test_single_step_sequential_approval_with_attachment(
     assert len(details["tasks"]) == 1
     assert details["tasks"][0]["status"] == "APPROVED"
     assert len(details["attachments"]) == 1
+    assert details["attachments"][0]["filename"] == "receipt.pdf"
     assert [log["action"] for log in details["audit_logs"]] == [
         "WORKFLOW_STARTED",
         "STEP_DISPATCHED",
@@ -199,12 +217,18 @@ async def test_multi_approver_sequential_stage_order(
 async def test_multistep_sequential_and_parallel_synchronization(
     api_client: httpx.AsyncClient,
     fake_mm_server: FakeMattermostServer,
+    tmp_path: Path,
 ) -> None:
     """
-    Verifies a 3-stage workflow:
+    Verifies a 3-stage workflow with a file attachment:
     Step 0 (sequential: user_dept) -> Step 1 (parallel: user_legal + user_finance) -> Step 2 (sequential: user_ceo).
-    Ensures Step 2 is dispatched only after BOTH parallel approvers approve.
+    Ensures:
+    - Step 2 is dispatched only after BOTH parallel approvers approve.
+    - The temporary attachment remains on disk across intermediate stages so all 4 approvers receive it,
+      and is deleted only after the final CEO approval.
     """
+    upload_dir = tmp_path / "uploads"
+
     start_resp = await api_client.post(
         "/api/v1/workflows/start",
         data={
@@ -213,9 +237,11 @@ async def test_multistep_sequential_and_parallel_synchronization(
             "initiator_id": "user_initiator",
             "lang": "de",
         },
+        files=[("files", ("enterprise_contract.pdf", b"%PDF-1.4 contract", "application/pdf"))],
     )
     assert start_resp.status_code == 201
     workflow_id = start_resp.json()["workflow_id"]
+    assert len(list(upload_dir.glob("*enterprise_contract.pdf"))) == 1
 
     # Step 0: dept_head approves
     step0_post = fake_mm_server.posts["post_1"]
@@ -234,6 +260,9 @@ async def test_multistep_sequential_and_parallel_synchronization(
             workflow_id=workflow_id,
         ),
     )
+
+    # Attachment must still exist on disk for subsequent stages
+    assert len(list(upload_dir.glob("*enterprise_contract.pdf"))) == 1
 
     # Step 1 (parallel): two posts must be dispatched simultaneously (post_2 and post_3)
     assert len(fake_mm_server.posts) == 3
@@ -267,6 +296,7 @@ async def test_multistep_sequential_and_parallel_synchronization(
     assert mid_state["status"] == "IN_PROGRESS"
     assert mid_state["current_step_index"] == 1
     assert len(fake_mm_server.posts) == 3  # CEO has NOT been notified yet
+    assert len(list(upload_dir.glob("*enterprise_contract.pdf"))) == 1
 
     # Second parallel approver (user_finance) approves -> advances to Step 2 (user_ceo)
     await api_client.post(
@@ -284,9 +314,12 @@ async def test_multistep_sequential_and_parallel_synchronization(
     assert len(fake_mm_server.posts) == 4
     ceo_post = fake_mm_server.posts["post_4"]
     assert ceo_post["channel_id"] == "dm_user_ceo"
+    assert len(fake_mm_server.uploaded_files) == 4  # Uploaded to all 4 approvers' DMs
+    assert len(list(upload_dir.glob("*enterprise_contract.pdf"))) == 1
+
     ceo_task_id = ceo_post["props"]["attachments"][0]["actions"][0]["integration"]["context"]["task_id"]
 
-    # Step 2: CEO approves -> workflow reaches APPROVED
+    # Step 2: CEO approves -> workflow reaches APPROVED and temporary file is deleted
     await api_client.post(
         "/api/v1/mattermost/actions?token=test_secret_token",
         json=_build_button_payload(
@@ -300,6 +333,8 @@ async def test_multistep_sequential_and_parallel_synchronization(
         ),
     )
 
+    assert list(upload_dir.iterdir()) == []
+
     final_state = (await api_client.get(f"/api/v1/workflows/{workflow_id}")).json()
     assert final_state["status"] == "APPROVED"
     assert final_state["current_step_index"] == 2
@@ -309,14 +344,18 @@ async def test_multistep_sequential_and_parallel_synchronization(
 async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     api_client: httpx.AsyncClient,
     fake_mm_server: FakeMattermostServer,
+    tmp_path: Path,
 ) -> None:
     """
     Verifies the complete rejection flow during a parallel stage:
     1. Clicking Reject opens an Interactive Dialog.
     2. Submitting an empty reason returns a field-level validation error.
     3. Submitting a valid reason marks the task REJECTED, cancels the parallel peer's task and
-       removes their buttons, sets the workflow status to REJECTED, and sends a DM to the initiator.
+       removes their buttons, sets the workflow status to REJECTED, sends a DM to the initiator,
+       and deletes temporary attachment files from uploads.
     """
+    upload_dir = tmp_path / "uploads"
+
     start_resp = await api_client.post(
         "/api/v1/workflows/start",
         data={
@@ -325,8 +364,10 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
             "initiator_id": "user_initiator",
             "lang": "en",
         },
+        files=[("files", ("sla_amendment.pdf", b"%PDF-1.4 sla", "application/pdf"))],
     )
     workflow_id = start_resp.json()["workflow_id"]
+    assert len(list(upload_dir.glob("*sla_amendment.pdf"))) == 1
 
     # Advance past Step 0 (dept_head) to enter the parallel Legal & Finance stage
     step0_task_id = fake_mm_server.posts["post_1"]["props"]["attachments"][0]["actions"][0]["integration"][
@@ -384,6 +425,8 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     )
     assert empty_submit_resp.status_code == 200
     assert "rejection_reason" in empty_submit_resp.json()["errors"]
+    # File must still remain on disk because rejection was not yet accepted
+    assert len(list(upload_dir.glob("*sla_amendment.pdf"))) == 1
 
     # 3. Submit dialog with valid rejection reason
     rejection_text = "Liability cap clause violates corporate policy."
@@ -402,6 +445,9 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     assert valid_submit_resp.status_code == 200
     assert valid_submit_resp.json() == {}
 
+    # Verify temporary attachment file was physically removed from uploads after rejection
+    assert list(upload_dir.iterdir()) == []
+
     # Verify both parallel cards (post_2 and post_3) now have no interactive buttons
     assert "actions" not in fake_mm_server.posts["post_2"]["props"]["attachments"][0]
     assert rejection_text in fake_mm_server.posts["post_2"]["props"]["attachments"][0]["text"]
@@ -413,9 +459,11 @@ async def test_rejection_dialog_cancels_parallel_sibling_and_notifies_initiator(
     assert initiator_dm["channel_id"] == "dm_user_initiator"
     assert rejection_text in initiator_dm["props"]["attachments"][0]["text"]
 
-    # Verify database task statuses and workflow status
+    # Verify database task statuses, workflow status, and preserved attachment metadata
     final_details = (await api_client.get(f"/api/v1/workflows/{workflow_id}")).json()
     assert final_details["status"] == "REJECTED"
+    assert len(final_details["attachments"]) == 1
+    assert final_details["attachments"][0]["filename"] == "sla_amendment.pdf"
     tasks_by_approver = {t["approver_id"]: t for t in final_details["tasks"]}
     assert tasks_by_approver["user_legal"]["status"] == "REJECTED"
     assert tasks_by_approver["user_legal"]["comment"] == rejection_text
@@ -506,8 +554,16 @@ async def test_security_authorization_and_idempotency(
     assert len(fake_mm_server.posts) == 2  # No duplicate completion DM created
 
 
-async def test_api_validation_and_not_found_errors(api_client: httpx.AsyncClient) -> None:
-    """Verifies HTTP error codes for invalid workflow types, unsupported languages, and unknown IDs."""
+async def test_api_validation_and_not_found_errors(
+    api_client: httpx.AsyncClient,
+    tmp_path: Path,
+) -> None:
+    """
+    Verifies HTTP error codes for invalid workflow types, unsupported languages,
+    unknown IDs, and ensures uploaded files are cleaned up if workflow startup fails.
+    """
+    upload_dir = tmp_path / "uploads"
+
     # Unsupported language
     bad_lang_resp = await api_client.post(
         "/api/v1/workflows/start",
@@ -532,7 +588,7 @@ async def test_api_validation_and_not_found_errors(api_client: httpx.AsyncClient
     )
     assert bad_json_resp.status_code == 400
 
-    # Unknown workflow type
+    # Unknown workflow type with file upload -> returns 404 and cleans up staged file
     unknown_wf_resp = await api_client.post(
         "/api/v1/workflows/start",
         data={
@@ -540,8 +596,10 @@ async def test_api_validation_and_not_found_errors(api_client: httpx.AsyncClient
             "title": "Test",
             "initiator_id": "user_initiator",
         },
+        files=[("files", ("orphaned.pdf", b"%PDF-1.4 orphaned", "application/pdf"))],
     )
     assert unknown_wf_resp.status_code == 404
+    assert list(upload_dir.iterdir()) == []
 
     # Non-existent workflow instance ID
     missing_id_resp = await api_client.get("/api/v1/workflows/00000000-0000-0000-0000-000000000000")

@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: locales.yaml
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.0
 
 en:
   card:
@@ -53,6 +53,8 @@ en:
     task_approved: "Task {task_id} (workflow {workflow_id}) approved by {actor_id}."
     task_rejected: "Task {task_id} (workflow {workflow_id}) rejected by {actor_id}. Reason: {reason}"
     workflow_completed: "Workflow {workflow_id} finished with status {status}."
+    attachments_cleaned: "Cleaned up {count} temporary attachment file(s) for finalized workflow {workflow_id}."
+    attachment_cleanup_failed: "Failed to remove temporary attachment file '{path}' for workflow {workflow_id}: {detail}"
     mm_api_error: "Mattermost API error on endpoint {endpoint} (HTTP {status_code}): {message}"
 
 de:
@@ -105,6 +107,8 @@ de:
     task_approved: "Aufgabe {task_id} (Prozess {workflow_id}) von {actor_id} genehmigt."
     task_rejected: "Aufgabe {task_id} (Prozess {workflow_id}) von {actor_id} abgelehnt. Grund: {reason}"
     workflow_completed: "Prozess {workflow_id} wurde mit Status {status} abgeschlossen."
+    attachments_cleaned: "{count} temporäre Anhangsdatei(en) für abgeschlossenen Prozess {workflow_id} bereinigt."
+    attachment_cleanup_failed: "Temporäre Anhangsdatei '{path}' für Prozess {workflow_id} konnte nicht gelöscht werden: {detail}"
     mm_api_error: "Mattermost API Fehler auf Endpunkt {endpoint} (HTTP {status_code}): {message}"
 
 ru:
@@ -118,4 +122,6 @@ ru:
     task_approved: "Задача {task_id} (процесс {workflow_id}) согласована пользователем {actor_id}."
     task_rejected: "Задача {task_id} (процесс {workflow_id}) отклонена пользователем {actor_id}. Причина: {reason}"
     workflow_completed: "Процесс {workflow_id} завершен со статусом {status}."
+    attachments_cleaned: "Удалено временных файлов вложений ({count}) для завершенного процесса {workflow_id}."
+    attachment_cleanup_failed: "Не удалось удалить временный файл вложения '{path}' для процесса {workflow_id}: {detail}"
     mm_api_error: "Ошибка Mattermost API на эндпоинте {endpoint} (HTTP {status_code}): {message}"

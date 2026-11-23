@@ -1,12 +1,12 @@
 # Author: Oleh Riabtsev
 # File: app/workflow_engine.py
 # Created: 2026-11-23
-# Version: 1.1.0
+# Version: 1.2.0
 
 """
 Core Document Approval Workflow Engine (FSM).
 Manages workflow lifecycle transitions, sequential and parallel approval stages,
-Mattermost card updates, and initiator notifications.
+Mattermost card updates, initiator notifications, and temporary attachment cleanup.
 """
 
 from datetime import datetime, timezone
@@ -69,57 +69,66 @@ class WorkflowEngine:
     ) -> WorkflowInstance:
         """
         Creates a new workflow instance, persists attachment metadata,
-        and dispatches the initial workflow stage.
+        and dispatches the initial workflow stage. Cleans up staged files if startup fails.
         """
-        wf_def = self.workflows_config.workflows.get(workflow_type)
-        if not wf_def:
-            raise WorkflowEngineError(
-                "api.err_unknown_workflow_type", status_code=404, workflow_type=workflow_type
+        try:
+            wf_def = self.workflows_config.workflows.get(workflow_type)
+            if not wf_def:
+                raise WorkflowEngineError(
+                    "api.err_unknown_workflow_type", status_code=404, workflow_type=workflow_type
+                )
+
+            effective_lang = self.translator.normalize_lang(
+                lang or wf_def.default_lang or self.workflows_config.default_lang
             )
 
-        effective_lang = self.translator.normalize_lang(
-            lang or wf_def.default_lang or self.workflows_config.default_lang
-        )
-
-        instance = WorkflowInstance(
-            workflow_type=workflow_type,
-            title=title,
-            description=description,
-            document_data=document_data,
-            initiator_id=initiator_id,
-            lang=effective_lang,
-            status=WorkflowStatus.IN_PROGRESS,
-            current_step_index=0,
-        )
-        db.add(instance)
-        await db.flush()  # Obtain generated instance.id
-
-        # Register uploaded file metadata
-        for file_meta in saved_files:
-            attachment = DocumentAttachment(
-                workflow_id=instance.id,
-                filename=file_meta["filename"],
-                content_type=file_meta["content_type"],
-                storage_path=file_meta["storage_path"],
-                file_size=file_meta["file_size"],
+            instance = WorkflowInstance(
+                workflow_type=workflow_type,
+                title=title,
+                description=description,
+                document_data=document_data,
+                initiator_id=initiator_id,
+                lang=effective_lang,
+                status=WorkflowStatus.IN_PROGRESS,
+                current_step_index=0,
             )
-            db.add(attachment)
+            db.add(instance)
+            await db.flush()  # Obtain generated instance.id
 
-        initiator_username = await self.mm_client.get_username(initiator_id)
-        db.add(
-            AuditLog(
-                workflow_id=instance.id,
-                actor_id=initiator_id,
-                actor_username=initiator_username,
-                action="WORKFLOW_STARTED",
-                details=f"Workflow '{workflow_type}' started with language '{effective_lang}'.",
+            # Register uploaded file metadata
+            for file_meta in saved_files:
+                attachment = DocumentAttachment(
+                    workflow_id=instance.id,
+                    filename=file_meta["filename"],
+                    content_type=file_meta["content_type"],
+                    storage_path=file_meta["storage_path"],
+                    file_size=file_meta["file_size"],
+                )
+                db.add(attachment)
+
+            initiator_username = await self.mm_client.get_username(initiator_id)
+            db.add(
+                AuditLog(
+                    workflow_id=instance.id,
+                    actor_id=initiator_id,
+                    actor_username=initiator_username,
+                    action="WORKFLOW_STARTED",
+                    details=f"Workflow '{workflow_type}' started with language '{effective_lang}'.",
+                )
             )
-        )
-        await db.flush()
+            await db.flush()
 
-        # Dispatch the first step (index 0)
-        await self._dispatch_step(db, instance, step_index=0, initiator_username=initiator_username)
-        await db.commit()
+            # Dispatch the first step (index 0)
+            await self._dispatch_step(db, instance, step_index=0, initiator_username=initiator_username)
+            await db.commit()
+        except Exception:
+            # Remove orphaned temporary files from disk if workflow initialization fails
+            for file_meta in saved_files:
+                self._remove_file_safely(
+                    workflow_id="uncommitted",
+                    storage_path=file_meta.get("storage_path", ""),
+                )
+            raise
 
         logger.info(
             self.translator.t_log(
@@ -363,6 +372,11 @@ class WorkflowEngine:
         # Advance to the next approver in a sequential stage or to the next workflow step
         await self._advance_after_approval(db, workflow, step_cfg, initiator_username)
         await db.commit()
+
+        # Remove temporary files from disk once the workflow reaches a terminal state
+        if workflow.status in {WorkflowStatus.APPROVED, WorkflowStatus.REJECTED}:
+            await self._cleanup_workflow_attachments(db, workflow.id)
+
         return None
 
     async def _advance_after_approval(
@@ -495,7 +509,7 @@ class WorkflowEngine:
     ) -> None:
         """
         Records document rejection after dialog submission, updates Mattermost cards,
-        cancels sibling parallel tasks, and notifies the initiator.
+        cancels sibling parallel tasks, notifies the initiator, and cleans up temporary files.
         """
         task = await self._load_task_with_workflow(db, task_id)
         if not task:
@@ -619,6 +633,9 @@ class WorkflowEngine:
 
         await db.commit()
 
+        # Remove temporary files from disk after workflow rejection is persisted
+        await self._cleanup_workflow_attachments(db, workflow.id)
+
         logger.info(
             self.translator.t_log(
                 "task_rejected",
@@ -628,6 +645,53 @@ class WorkflowEngine:
                 reason=rejection_reason,
             )
         )
+
+    async def _cleanup_workflow_attachments(self, db: AsyncSession, workflow_id: str) -> None:
+        """
+        Deletes temporary uploaded files from the local uploads directory once a workflow
+        is finalized (APPROVED or REJECTED), while keeping database metadata for audit history.
+        """
+        att_result = await db.execute(
+            select(DocumentAttachment).where(DocumentAttachment.workflow_id == workflow_id)
+        )
+        attachments = list(att_result.scalars().all())
+        if not attachments:
+            return
+
+        deleted_count = 0
+        for att in attachments:
+            if self._remove_file_safely(workflow_id=workflow_id, storage_path=att.storage_path):
+                deleted_count += 1
+
+        if deleted_count > 0:
+            logger.info(
+                self.translator.t_log(
+                    "attachments_cleaned",
+                    workflow_id=workflow_id,
+                    count=deleted_count,
+                )
+            )
+
+    def _remove_file_safely(self, *, workflow_id: str, storage_path: str) -> bool:
+        """Unlinks a single temporary file from disk without raising filesystem exceptions."""
+        if not storage_path:
+            return False
+
+        file_path = Path(storage_path)
+        try:
+            if file_path.exists() and file_path.is_file():
+                file_path.unlink()
+                return True
+        except OSError as exc:
+            logger.warning(
+                self.translator.t_log(
+                    "attachment_cleanup_failed",
+                    workflow_id=workflow_id,
+                    path=str(file_path),
+                    detail=str(exc),
+                )
+            )
+        return False
 
     @staticmethod
     async def _load_task_with_workflow(db: AsyncSession, task_id: str) -> ApprovalTask | None:
