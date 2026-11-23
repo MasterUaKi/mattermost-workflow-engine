@@ -1,7 +1,7 @@
 # Author: Oleh Riabtsev
 # File: docker-compose.yml
 # Created: 2026-11-23
-# Version: 1.0.0
+# Version: 1.1.0
 
 services:
   db:
@@ -14,6 +14,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-workflow_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
@@ -22,6 +23,35 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  mattermost:
+    image: mattermost/mattermost-team-edition:latest
+    container_name: mattermost-local-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TZ: Europe/Berlin
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: postgres://${POSTGRES_USER:-workflow_user}:${POSTGRES_PASSWORD:-workflow_pass}@db:5432/${MATTERMOST_DB:-mattermost_db}?sslmode=disable&connect_timeout=10
+      MM_SERVICESETTINGS_SITEURL: http://localhost:${MATTERMOST_PORT:-8065}
+      MM_SERVICESETTINGS_LISTENADDRESS: :8065
+      # Pre-enable bot creation, access tokens, and internal Docker webhook callbacks
+      MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION: "true"
+      MM_SERVICESETTINGS_ENABLEUSERACCESSTOKENS: "true"
+      MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS: "workflow-engine localhost 127.0.0.1 host.docker.internal"
+      MM_FILESETTINGS_DIRECTORY: /mattermost/data/
+      MM_BLEVESETTINGS_INDEXDIR: /mattermost/bleve-indexes
+    ports:
+      - "${MATTERMOST_PORT:-8065}:8065"
+    volumes:
+      - mattermost_config:/mattermost/config
+      - mattermost_data:/mattermost/data
+      - mattermost_logs:/mattermost/logs
+      - mattermost_plugins:/mattermost/plugins
+      - mattermost_client_plugins:/mattermost/client/plugins
+      - mattermost_bleve:/mattermost/bleve-indexes
 
   workflow-engine:
     build:
@@ -35,18 +65,18 @@ services:
     env_file:
       - .env
     environment:
-      # Override DATABASE_URL to connect to the PostgreSQL container via asyncpg
+      # Internal Docker network URLs for PostgreSQL and local Mattermost
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-workflow_user}:${POSTGRES_PASSWORD:-workflow_pass}@db:5432/${POSTGRES_DB:-workflow_db}
+      MATTERMOST_URL: http://mattermost:8065
+      PUBLIC_BASE_URL: http://workflow-engine:8000
       WORKFLOWS_CONFIG_PATH: /app/workflows.yaml
       LOCALES_PATH: /app/locales.yaml
       UPLOAD_DIR: /app/uploads
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
-      # Mount workflow rules and localization files directly so edits do not require image rebuilds
       - ./workflows.yaml:/app/workflows.yaml:ro
       - ./locales.yaml:/app/locales.yaml:ro
-      # Persist uploaded document attachments across container restarts
       - workflow_uploads:/app/uploads
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -54,3 +84,9 @@ services:
 volumes:
   postgres_data:
   workflow_uploads:
+  mattermost_config:
+  mattermost_data:
+  mattermost_logs:
+  mattermost_plugins:
+  mattermost_client_plugins:
+  mattermost_bleve:
