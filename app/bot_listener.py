@@ -1,13 +1,13 @@
 # Author: Oleh Riabtsev
 # File: app/bot_listener.py
 # Created: 2026-11-23
-# Version: 1.0.0
+# Version: 1.1.0
 
 """
 Background Mattermost WebSocket listener for the bot account.
-Allows any user to send a Direct Message to the bot (e.g., 'start', 'старт',
-'хочу начать согласование', 'neu') and immediately receive a signed magic link
-opening the Visual Workflow Studio authenticated as that user.
+Allows any user to send a Direct Message to the bot (e.g., 'start', 'starten',
+'freigabe starten', 'старт', 'хочу начать согласование', 'neu') and immediately
+receive a signed magic link opening the Visual Workflow Studio authenticated as that user.
 """
 
 import asyncio
@@ -24,18 +24,49 @@ logger = logging.getLogger("workflow_engine.bot_ws")
 
 TRIGGER_KEYWORDS = {
     "start",
+    "starten",
+    "neu",
+    "genehmigung",
+    "freigabe",
+    "ablauf",
+    "studio",
+    "help",
+    "hilfe",
     "старт",
     "начать",
     "согласование",
     "хочу начать согласование",
     "запуск",
-    "neu",
-    "genehmigung",
-    "studio",
-    "help",
     "помощь",
-    "hilfe",
 }
+
+TRIGGER_SUBSTRINGS = (
+    "start",
+    "genehmig",
+    "freigab",
+    "ablauf",
+    "prüf",
+    "pruef",
+    "dokument",
+    "workflow",
+    "prozess",
+    "согласован",
+    "старт",
+    "начать",
+)
+
+GERMAN_HINTS = (
+    "starten",
+    "neu",
+    "genehmig",
+    "freigab",
+    "ablauf",
+    "prüf",
+    "pruef",
+    "dokument",
+    "prozess",
+    "hilfe",
+)
 
 
 class BotWebSocketListener:
@@ -128,7 +159,8 @@ class BotWebSocketListener:
             return
 
         data = event.get("data", {})
-        if data.get("channel_type") != "D":
+        channel_type = data.get("channel_type", "")
+        if channel_type and channel_type != "D":
             return
 
         post_raw = data.get("post")
@@ -148,15 +180,13 @@ class BotWebSocketListener:
         if not message_text:
             return
 
-        # Match direct keywords or phrases like 'хочу начать согласование'
         is_trigger = message_text in TRIGGER_KEYWORDS or any(
-            kw in message_text for kw in ("согласован", "start", "старт", "genehmig")
+            kw in message_text for kw in TRIGGER_SUBSTRINGS
         )
         if not is_trigger:
             return
 
-        # Infer preferred reply language from the user's message
-        reply_lang = "de" if any(w in message_text for w in ("neu", "genehmig", "hilfe")) else "en"
+        reply_lang = "de" if any(w in message_text for w in GERMAN_HINTS) else "en"
 
         username = await self.mm_client.get_username(sender_id)
         session_token = create_studio_session_token(
